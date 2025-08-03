@@ -2,18 +2,83 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <assert.h>
-#include <locale.h>
 
-#define panic(...) assert((__VA_OPT__((void) __VA_ARGS__,)0))
+float badstof(const char * s)
+{
+    double sign = 1.0;
+    if (*s == '-') { sign = -1.0; s += 1; }
+    
+    if (s[0] && s[1] && s[2])
+    {
+        if (strncmp(s, "inf", 3) == 0) return sign/0.0;
+        if (strncmp(s, "Inf", 3) == 0) return sign/0.0;
+        if (strncmp(s, "INF", 3) == 0) return sign/0.0;
+        if (strncmp(s, "NaN", 3) == 0) return 0.0/0.0;
+        if (strncmp(s, "nan", 3) == 0) return 0.0/0.0;
+    }
+    
+    double ret = 0.0;
+    while (*s != 0 && *s != '.')
+    {
+        ret *= 10.0;
+        ret += *s - '0';
+        s += 1;
+    }
+    if (*s == '.')
+    {
+        s += 1;
+        double f2 = 0.1;
+        while (*s != 0)
+        {
+            ret += (*s - '0') * f2;
+            f2 *= 0.1;
+            s += 1;
+        }
+    }
+    return ret * sign;
+}
+
+#define STRINGIZE(x) STRINGIZE2(x)
+#define STRINGIZE2(x) #x
+#define LINE_STRING STRINGIZE(__LINE__)
 
 #define IDENTIFIER_COUNT 32000
-
 typedef struct _IdEntry {
     const char * where;
     uint16_t len;
 } IdEntry;
 
+void printc(char c)
+{
+    printf("%c", c);
+}
+
+void printu16hex(uint16_t x)
+{
+    //const char * chars[16] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"};
+    char chars[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
+    printc(chars[(x >> 12) & 0xF]);
+    printc(chars[(x >> 8) & 0xF]);
+    printc(chars[(x >> 4) & 0xF]);
+    printc(chars[(x >> 0) & 0xF]);
+}
+void printsn(const char * s, size_t l)
+{
+    while (l > 0) printc(s[l--]);
+    //printf("%.*s", l, s);
+}
+void prints(const char * s)
+{
+    //while (*s != 0) printc(*(s++));
+    fputs(s, stdout);
+}
+
+#define assert(X) if (!(X)) { prints("Assertion failed:\n" #X "\nline " LINE_STRING " in " __FILE__ "\n"); fflush(stdout); abort(); }
+#define perror(X) fputs(X, stderr)
+#define panic(...) assert((__VA_OPT__((void) __VA_ARGS__,)0))
+
+
+int16_t highest_ident_id = 0;
 int16_t insert_or_lookup_id(const char * text, uint16_t len)
 {
     // FIXME make non-static
@@ -35,6 +100,8 @@ int16_t insert_or_lookup_id(const char * text, uint16_t len)
             
             ids[j].where = c;
             ids[j].len = len;
+            
+            highest_ident_id = j;
             return -j;
         }
         else if (ids[j].len == len && strncmp(ids[j].where, text, len) == 0)
@@ -42,7 +109,7 @@ int16_t insert_or_lookup_id(const char * text, uint16_t len)
             return -j;
         }
     }
-    panic();
+    panic("Ran out of unique IDs");
 }
 
 typedef struct _Token {
@@ -59,7 +126,16 @@ int token_is(const char * source, Token * tokens, size_t count, size_t i, const 
     return strncmp(source + tokens[i].i, text, len) == 0;
 }
 
-Token mk_token(uint32_t i, uint16_t len, int16_t kind) { Token t; t.i = i; t.len = len; t.kind = kind; return t; }
+Token mk_token(uint32_t i, uint16_t len, int16_t kind)
+{
+    Token t;
+    t.i = i;
+    t.len = len;
+    t.kind = kind;
+    return t;
+}
+
+int lex_ident_offset = 0;
 
 Token * tokenize(const char * source, size_t * count)
 {
@@ -78,6 +154,7 @@ Token * tokenize(const char * source, size_t * count)
     insert_or_lookup_id("let", 3);       // 10
     insert_or_lookup_id("begin", 3);     // 11
     insert_or_lookup_id("end", 3);       // 12
+    lex_ident_offset = highest_ident_id;
     
     const char * long_punctuation[] = {
         "==", "!=", ">=", "<=", "->",
@@ -167,19 +244,19 @@ Token * tokenize(const char * source, size_t * count)
 }
 
 enum {
-    // zero-op
     INST_INVALID,
+    // zero-op
+    INST_EQ = 0x1000,
     INST_ADD, INST_SUB, INST_MUL, INST_DIV,
-    INST_EQ,
     // 2byte-op
-    PUSH_NAME = 0x1000,
+    PUSH_NAME = 0x2000,
     // 4byte-op
-    INST_IF = 0x2000, // destination
+    INST_IF = 0x3000, // destination
     INST_JMP, // destination
     PUSH_NUM, // f32
     PUSH_STRING, // token index
     // 8byte-op
-    INST_FUNCDEF = 0x4000, // 2 id 2 argcount 4 length
+    INST_FUNCDEF = 0x5000, // 2 id 2 argcount 4 length
 };
 
 // FIXME: make non-global
@@ -230,7 +307,7 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
         char * s = malloc(tokens[i].len + 1);
         memcpy(s, &source[tokens[i].i], tokens[i].len);
         s[tokens[i].len] = 0;
-        float f = atof(s);
+        float f = badstof(s);
         free(s);
         
         program[prog_i++] = 0;
@@ -332,9 +409,12 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
     }
     else
     {
-        printf("AT: [%.*s]\n", tokens[i].len, source + tokens[i].i);
+        prints("AT: ");
+        printsn(source + tokens[i].i, tokens[i].len);
+        prints("\n");
         panic("TODO");
     }
+    panic("");
 }
 size_t compile_statementlist(const char * source, Token * tokens, size_t count, size_t i)
 {
@@ -403,10 +483,9 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
                 panic("function incomplete");
             i += r + 1;
             
-            if (tokens[i].kind == -12) // end
-                i += 1;
-            else
+            if (tokens[i].kind != -12) // end
                 panic("Functions must end with the end keyword");
+            i += 1;
         }
         else if (token_is(source, tokens, count, i, "\n"))
         {
@@ -414,7 +493,9 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
         }
         else
         {
-            printf("AT: [%.*s]\n", tokens[i].len, source + tokens[i].i);
+            prints("AT: ");
+            printsn(source + tokens[i].i, tokens[i].len);
+            prints("\n");
             panic("unexpected end of script: all root-level items must be function definitions");
             break;
         }
@@ -422,10 +503,42 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
     return i - orig_i;
 }
 
+struct _Value;
+typedef struct _Array {
+    struct _Value * first;
+    size_t len;
+} Array;
+typedef struct _Value {
+    union { float f; Array * a; } u;
+    uint8_t tag;
+} Value;
+typedef struct _Frame {
+    Value * stack;
+    Value * vars;
+    struct _Frame * return_to;
+    size_t pc;
+} Frame;
+
+void interpret(void)
+{
+    Frame * frame = (Frame *)malloc(sizeof(Frame));
+    if (!frame) return;
+    memset(frame, 0, sizeof(Frame));
+    while (1)
+    {
+        switch (program[frame->pc])
+        {
+        case INST_FUNCDEF: {
+            
+        }
+        default:
+            panic("unknown operation");
+        }
+    }
+}
+
 int main(int argc, char ** argv)
 {
-    if (setlocale(LC_ALL, "C") == NULL) { perror("Failed to set locale to 'C'"); return 1; }
-    
     if (argc < 2) { puts("Usage: filli filename.fil"); return 0; }
     char * source = 0;
     size_t total_size = 0;
@@ -458,7 +571,9 @@ int main(int argc, char ** argv)
     Token * tokens = tokenize(source, &count);
     for (size_t i = 0; i < count; i++)
     {
-        printf("[%.*s]\n", tokens[i].len, source + tokens[i].i);
+        prints("[");
+        printsn(source + tokens[i].i, tokens[i].len);
+        prints("]\n");
     }
     
     compile(source, tokens, count, 0);
@@ -466,9 +581,34 @@ int main(int argc, char ** argv)
     for (size_t i = 0; i < prog_i; i++)
     {
         //printf("%02X %02X\n", program[i] & 0xFF, program[i] >> 8);
-        printf("%04X\n", program[i]);
+        //printf("%04X\n", program[i]);
+        printu16hex(program[i]);
+        //fwrite(
+        prints("\n");
     }
     
-    puts("Done!");
+    // subnormals: 0x00800000
+    // infs and nans: 0x7F800000
+    //for (uint64_t i = (1ULL << 30); i < 00800000; i++)
+    //for (uint64_t i = 0; i < 0x80000000; i++)
+    //for (uint64_t i = 0; i < 0x80000000; i++)
+    for (uint64_t i = 0; i < 0x80000000; i++)
+    {
+        if (!(i & 0xFFFFF)) printf("Progress: %f%%\n", (i)/(double)0x80000000*100.0);
+        uint32_t i32 = i;
+        float f;
+        memcpy(&f, &i32, 4);
+        char s[100];
+        sprintf(s, "%.45f", f);
+        
+        float a = (float)badstof(s);
+        float b = f;
+        //float b = atof(s);
+        if (a != b)
+        {
+            if ((a != a) != (b != b))
+                printf("%s: %.45f\t%.45f\n", s, a, b);
+        }
+    }
     return 0;
 }
