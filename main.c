@@ -3,43 +3,41 @@
 #include <stdlib.h>
 #include <string.h>
 
-float badstof(const char * s)
+float badstrtof(const char * s)
 {
     double sign = 1.0;
     if (*s == '-') { sign = -1.0; s += 1; }
     
+    if (!s[0]) return 0.0 * sign;
+    
     if (s[0] && s[1] && s[2])
     {
-        if (strncmp(s, "inf", 3) == 0) return sign/0.0;
-        if (strncmp(s, "Inf", 3) == 0) return sign/0.0;
-        if (strncmp(s, "INF", 3) == 0) return sign/0.0;
-        if (strncmp(s, "NaN", 3) == 0) return 0.0/0.0;
-        if (strncmp(s, "nan", 3) == 0) return 0.0/0.0;
+        if ((s[0]|32) == 'i' && (s[1]|32) == 'n' && (s[0]|32) == 'f') return sign/0.0;
+        if ((s[0]|32) == 'n' && (s[1]|32) == 'a' && (s[0]|32) == 'n') return 0.0/0.0;
     }
     
     double ret = 0.0;
-    while (*s != 0 && *s != '.')
+    while (*s != 0 && *s != '.' && *s >= '0' && *s <= '9')
     {
         ret *= 10.0;
-        ret += *s - '0';
-        s += 1;
+        ret += *(s++) - '0';
     }
-    if (*s == '.')
+    
+    if (*(s++) == '.')
     {
-        s += 1;
         double f2 = 0.1;
-        while (*s != 0)
+        while (*s != 0 && *s >= '0' && *s <= '9')
         {
-            ret += (*s - '0') * f2;
+            ret += (*(s++) - '0') * f2;
             f2 *= 0.1;
-            s += 1;
         }
     }
+    
     return ret * sign;
 }
 
-#define STRINGIZE(x) STRINGIZE2(x)
 #define STRINGIZE2(x) #x
+#define STRINGIZE(x) STRINGIZE2(x)
 #define LINE_STRING STRINGIZE(__LINE__)
 
 #define IDENTIFIER_COUNT 32000
@@ -48,35 +46,32 @@ typedef struct _IdEntry {
     uint16_t len;
 } IdEntry;
 
-void printc(char c)
-{
-    printf("%c", c);
-}
-
-void printu16hex(uint16_t x)
-{
-    //const char * chars[16] = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"};
-    char chars[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
-    printc(chars[(x >> 12) & 0xF]);
-    printc(chars[(x >> 8) & 0xF]);
-    printc(chars[(x >> 4) & 0xF]);
-    printc(chars[(x >> 0) & 0xF]);
-}
-void printsn(const char * s, size_t l)
-{
-    while (l > 0) printc(s[l--]);
-    //printf("%.*s", l, s);
-}
 void prints(const char * s)
 {
-    //while (*s != 0) printc(*(s++));
     fputs(s, stdout);
 }
+void eprints(const char * s)
+{
+    fputs(s, stderr);
+}
+void printu16hex(uint16_t x)
+{
+    char c[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
+    char s[5] = { c[(x>>12)&0xF], c[(x>>8)&15], c[(x>>4)&15], c[x&15], 0 };
+    prints(s);
+}
+void printsn(const char * s, size_t len)
+{
+    char * s2 = (char *)malloc(len+1);
+    s2[len] = 0;
+    memcpy(s2, s, len);
+    prints(s2);
+}
 
-#define assert(X) if (!(X)) { prints("Assertion failed:\n" #X "\nline " LINE_STRING " in " __FILE__ "\n"); fflush(stdout); abort(); }
-#define perror(X) fputs(X, stderr)
-#define panic(...) assert((__VA_OPT__((void) __VA_ARGS__,)0))
-
+#define die_now(X) { prints("Assert:\n" #X "\nat " LINE_STRING " in " __FILE__ "\n"); fflush(stdout); abort(); }
+#define assert(X) if (!(X)) { die_now(X) }
+#define perror(X) eprints(X)
+#define panic(...) die_now(__VA_OPT__((void) __VA_ARGS__))
 
 int16_t highest_ident_id = 0;
 int16_t insert_or_lookup_id(const char * text, uint16_t len)
@@ -94,7 +89,7 @@ int16_t insert_or_lookup_id(const char * text, uint16_t len)
     {
         if (ids[j].len == 0)
         {
-            char * c = malloc(len+1);
+            char * c = (char *)malloc(len+1);
             memcpy(c, text, len);
             c[len] = 0;
             
@@ -109,7 +104,7 @@ int16_t insert_or_lookup_id(const char * text, uint16_t len)
             return -j;
         }
     }
-    panic("Ran out of unique IDs");
+    panic("Out of IDs");
 }
 
 typedef struct _Token {
@@ -304,10 +299,10 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
     {
         program[prog_i++] = PUSH_NUM;
         
-        char * s = malloc(tokens[i].len + 1);
+        char * s = (char *)malloc(tokens[i].len + 1);
         memcpy(s, &source[tokens[i].i], tokens[i].len);
         s[tokens[i].len] = 0;
-        float f = badstof(s);
+        float f = badstrtof(s);
         free(s);
         
         program[prog_i++] = 0;
@@ -399,7 +394,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
             memcpy(program + jump_at, &prog_i, 4);
             i += 1;
         }
-        else panic("Missing end at end of if or if chain");
+        else panic("Missing end keyword");
         
         return i - orig_i;
     }
@@ -480,11 +475,11 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
         {
             size_t r = compile_func(source, tokens, count, i+1);
             if (r == 0)
-                panic("function incomplete");
+                panic("Incomplete function");
             i += r + 1;
             
             if (tokens[i].kind != -12) // end
-                panic("Functions must end with the end keyword");
+                panic("Missing end keyword");
             i += 1;
         }
         else if (token_is(source, tokens, count, i, "\n"))
@@ -496,7 +491,7 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
             prints("AT: ");
             printsn(source + tokens[i].i, tokens[i].len);
             prints("\n");
-            panic("unexpected end of script: all root-level items must be function definitions");
+            panic("Enexpected end of file");
             break;
         }
     }
@@ -508,10 +503,12 @@ typedef struct _Array {
     struct _Value * first;
     size_t len;
 } Array;
+
 typedef struct _Value {
     union { float f; Array * a; } u;
     uint8_t tag;
 } Value;
+
 typedef struct _Frame {
     Value * stack;
     Value * vars;
@@ -529,17 +526,17 @@ void interpret(void)
         switch (program[frame->pc])
         {
         case INST_FUNCDEF: {
-            
+            panic("TODO");
         }
         default:
-            panic("unknown operation");
+            panic("TODO");
         }
     }
 }
 
 int main(int argc, char ** argv)
 {
-    if (argc < 2) { puts("Usage: filli filename.fil"); return 0; }
+    if (argc < 2) { prints("Usage: filli filename.fil\n"); return 0; }
     char * source = 0;
     size_t total_size = 0;
     #define CHUNK_SIZE 4096
@@ -548,7 +545,7 @@ int main(int argc, char ** argv)
     if (!source) { perror("Out of memory"); return 1; }
     
     FILE * file = fopen(argv[1], "rb");
-    if (!file) { perror("Error opening file"); return 1; }
+    if (!file) { perror("Error reading file"); return 1; }
     
     size_t bytes_read = 0;
     while ((bytes_read = fread(source + total_size, 1, capacity - total_size - 1, file)) > 0)
@@ -587,28 +584,5 @@ int main(int argc, char ** argv)
         prints("\n");
     }
     
-    // subnormals: 0x00800000
-    // infs and nans: 0x7F800000
-    //for (uint64_t i = (1ULL << 30); i < 00800000; i++)
-    //for (uint64_t i = 0; i < 0x80000000; i++)
-    //for (uint64_t i = 0; i < 0x80000000; i++)
-    for (uint64_t i = 0; i < 0x80000000; i++)
-    {
-        if (!(i & 0xFFFFF)) printf("Progress: %f%%\n", (i)/(double)0x80000000*100.0);
-        uint32_t i32 = i;
-        float f;
-        memcpy(&f, &i32, 4);
-        char s[100];
-        sprintf(s, "%.45f", f);
-        
-        float a = (float)badstof(s);
-        float b = f;
-        //float b = atof(s);
-        if (a != b)
-        {
-            if ((a != a) != (b != b))
-                printf("%s: %.45f\t%.45f\n", s, a, b);
-        }
-    }
     return 0;
 }
