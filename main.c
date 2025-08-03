@@ -6,14 +6,13 @@
 #include <locale.h>
 
 #define IDENTIFIER_COUNT 32000
-#define JUMP_COUNT 32000
 
 typedef struct _IdEntry {
-    uint32_t i;
+    const char * where;
     uint16_t len;
 } IdEntry;
 
-int16_t insert_or_lookup_id(const char * source, uint32_t i, uint16_t len)
+int16_t insert_or_lookup_id(const char * text, uint16_t len)
 {
     // FIXME make non-static
     static IdEntry ids[IDENTIFIER_COUNT];
@@ -28,11 +27,11 @@ int16_t insert_or_lookup_id(const char * source, uint32_t i, uint16_t len)
     {
         if (ids[j].len == 0)
         {
-            ids[j].i = i;
+            ids[j].where = text;
             ids[j].len = len;
             return -j;
         }
-        else if (ids[j].len == len && strncmp(source + ids[j].i, source + i, len) == 0)
+        else if (ids[j].len == len && strncmp(ids[j].where, text, len) == 0)
         {
             return -j;
         }
@@ -46,24 +45,33 @@ typedef struct _Token {
     int16_t kind; // negative: identifier. zero: number. one: string. two: punctuation. three: newline (if enabled as token).
 } Token;
 
+int token_is(const char * source, Token * tokens, size_t count, size_t i, const char * text)
+{
+    if (i >= count) return 0;
+    size_t len = strlen(text);
+    if (tokens[i].len != len) return 0;
+    return strncmp(source + tokens[i].i, text, len) == 0;
+}
+
 Token mk_token(uint32_t i, uint16_t len, int16_t kind) { Token t; t.i = i; t.len = len; t.kind = kind; return t; }
 
 Token * tokenize(const char * source, size_t * count)
 {
-    int newline_is_token = 0;
+    int newline_is_token = 1;
     
     // give keywords known ids
-    insert_or_lookup_id("if", 0, 2);        // 1
-    insert_or_lookup_id("else", 0, 4);      // 2
-    insert_or_lookup_id("func", 0, 4);      // 3
-    insert_or_lookup_id("while", 0, 5);     // 4
-    insert_or_lookup_id("for", 0, 3);       // 5
-    insert_or_lookup_id("break", 0, 5);     // 6
-    insert_or_lookup_id("continue", 0, 8);  // 7
-    insert_or_lookup_id("return", 0, 6);    // 8
-    insert_or_lookup_id("let", 0, 3);       // 9
-    insert_or_lookup_id("then", 0, 3);      // 10
-    insert_or_lookup_id("end", 0, 3);       // 11
+    insert_or_lookup_id("if", 2);        // 1
+    insert_or_lookup_id("else", 4);      // 2
+    insert_or_lookup_id("elif", 4);      // 3
+    insert_or_lookup_id("func", 4);      // 4
+    insert_or_lookup_id("while", 5);     // 5
+    insert_or_lookup_id("for", 3);       // 6
+    insert_or_lookup_id("break", 5);     // 7
+    insert_or_lookup_id("continue", 8);  // 8
+    insert_or_lookup_id("return", 6);    // 9
+    insert_or_lookup_id("let", 3);       // 10
+    insert_or_lookup_id("begin", 3);     // 11
+    insert_or_lookup_id("end", 3);       // 12
     
     const char * long_punctuation[] = {
         "==", "!=", ">=", "<=",
@@ -79,13 +87,18 @@ Token * tokenize(const char * source, size_t * count)
         // skip comments and whitespace
         if (source[i] == '#') { while (source[i] != 0 && source[i] != '\n') { i++; } continue; }
         
-        if (newline_is_token && source[i] == '\n')
+        if (source[i] == ' ' || source[i] == '\t' || source[i] == '\r') { i++; continue; }
+        
+        if (source[i] == '\n')
         {
-            ret[t++] = mk_token(i++, 1, 3);
+            if (newline_is_token && t > 0 && token_is(source, ret, t, t-1, "\\"))
+                t -= 1;
+            else if (newline_is_token)
+                ret[t++] = mk_token(i++, 1, 3);
+            else
+                i++;
             continue;
         }
-        
-        if (source[i] == ' ' || source[i] == '\t' || source[i] == '\n' || source[i] == '\r') { i++; continue; }
         
         // tokenize numbers
         if (source[i] >= '0' && source[i] <= '9')
@@ -97,7 +110,6 @@ Token * tokenize(const char * source, size_t * count)
                 if (source[i++] == '.') dot_ok = 0;
             }
             ret[t++] = mk_token(start_i, i-start_i, 0);
-            t += 1;
             continue;
         }
         // tokenize identifiers and keywords
@@ -110,7 +122,7 @@ Token * tokenize(const char * source, size_t * count)
                   )
                 i++;
             
-            ret[t++] = mk_token(start_i, i-start_i, insert_or_lookup_id(source, start_i, i - start_i));
+            ret[t++] = mk_token(start_i, i-start_i, insert_or_lookup_id(source + start_i, i - start_i));
             continue;
         }
         // tokenize strings
@@ -154,23 +166,18 @@ typedef struct _Inst {
 } Inst;
 
 enum {
+    INST_INVALID,
+    INST_IF, INST_JMP,
     INST_ADD, INST_SUB, INST_MUL, INST_DIV,
     INST_EQ,
     PUSH_NUM, PUSH_STRING, PUSH_NAME,
 };
 
+Inst basic_inst(int n) { Inst ret; ret.op = n; ret.args[0] = 0; ret.args[1] = 0; return ret; }
+
 // FIXME: make non-global
-uint32_t jumps[JUMP_COUNT];
 Inst program[100000];
 size_t prog_i = 0;
-
-int token_is(const char * source, Token * tokens, size_t count, size_t i, const char * text)
-{
-    if (i >= count) return 0;
-    size_t len = strlen(text);
-    if (tokens[i].len != len) return 0;
-    return strncmp(source + tokens[i].i, text, len) == 0;
-}
 
 int tokenop_bindlevel(const char * source, Token * tokens, size_t count, size_t i)
 {
@@ -232,6 +239,8 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
 
 size_t compile_expr(const char * source, Token * tokens, size_t count, size_t i, int right_bind_power)
 {
+    if (i >= count) return 0;
+    
     size_t ret = compile_innerexpr(source, tokens, count, i);
     if (ret == 0) return 0;
     i += ret;
@@ -248,13 +257,14 @@ size_t compile_expr(const char * source, Token * tokens, size_t count, size_t i,
 }
 size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t i)
 {
+    if (i >= count) return 0;
+    
     int binding_power = tokenop_bindlevel(source, tokens, count, i);
     if (binding_power < 0) return 0;
     int r = compile_expr(source, tokens, count, i + 1, binding_power);
     if (r == 0) return 0;
     
-    Inst inst;
-    memset(&inst, 0, sizeof(inst));
+    Inst inst = basic_inst(0);
     if (token_is(source, tokens, count, i, "-"))
         inst.op = INST_SUB;
     else if (token_is(source, tokens, count, i, "+"))
@@ -267,17 +277,61 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
     return r + 1;
 }
 
+size_t compile_ifblock(const char * source, Token * tokens, size_t count, size_t i)
+{
+    assert(((void)"TODO ifblock", 0));
+}
+
+size_t compile_statement(const char * source, Token * tokens, size_t count, size_t i)
+{
+    if (i >= count) return 0;
+    size_t orig_i = i;
+    if (tokens[i].kind == -1) // if
+    {
+        i += compile_expr(source, tokens, count, i+1, 0) + 1;
+        assert(i < count && tokens[i].kind == -11); // begin
+        i++;
+        size_t jump_at = prog_i;
+        program[prog_i++] = basic_inst(INST_IF);
+        compile_ifblock(source, tokens, count, i);
+        assert(i < count);
+        if (tokens[i].kind == -2 || tokens[i].kind == -3) // elif
+        {
+            
+        }
+        else if (tokens[i].kind == -12) // end
+        {
+            
+        }
+        else assert(((void)"Missing end at end of if or if chain", 0));
+    }
+}
+size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
+{
+    puts("asdfjawe");
+    if (i >= count) return 0;
+    puts("kgear");
+    if (tokens[i].kind >= -12) return 0;
+    puts("egkjw35u");
+}
 size_t compile(const char * source, Token * tokens, size_t count, size_t i)
 {
     size_t orig_i = i;
     while (i < count)
     {
-        if (tokens[i].kind == -1) // if
+        if (tokens[i].kind == -4) // func
         {
-            i += compile_expr(source, tokens, count, i+1, 0) + 1;
+            i += compile_func(source, tokens, count, i+1) + 1;
+        }
+        else if (token_is(source, tokens, count, i, "\n"))
+        {
+            i += 1;
         }
         else
+        {
+            perror("unexpected end of script: all root-level items must be function definitions");
             break;
+        }
     }
     return i - orig_i;
 }
@@ -318,7 +372,7 @@ int main(int argc, char ** argv)
     Token * tokens = tokenize(source, &count);
     for (size_t i = 0; i < count; i++)
     {
-        printf("%.*s\n", tokens[i].len, source + tokens[i].i);
+        printf("[%.*s]\n", tokens[i].len, source + tokens[i].i);
     }
     
     compile(source, tokens, count, 0);
