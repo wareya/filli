@@ -5,6 +5,8 @@
 #include <assert.h>
 #include <locale.h>
 
+#define panic(...) assert((__VA_OPT__((void) __VA_ARGS__,)0))
+
 #define IDENTIFIER_COUNT 32000
 
 typedef struct _IdEntry {
@@ -40,7 +42,7 @@ int16_t insert_or_lookup_id(const char * text, uint16_t len)
             return -j;
         }
     }
-    assert(0);
+    panic();
 }
 
 typedef struct _Token {
@@ -165,17 +167,24 @@ Token * tokenize(const char * source, size_t * count)
 }
 
 enum {
+    // zero-op
     INST_INVALID,
-    INST_IF, INST_JMP,
     INST_ADD, INST_SUB, INST_MUL, INST_DIV,
     INST_EQ,
-    INST_FUNCDEF,
-    PUSH_NUM, PUSH_STRING, PUSH_NAME,
+    // 2byte-op
+    PUSH_NAME = 0x1000,
+    // 4byte-op
+    INST_IF = 0x2000, // destination
+    INST_JMP, // destination
+    PUSH_NUM, // f32
+    PUSH_STRING, // token index
+    // 8byte-op
+    INST_FUNCDEF = 0x4000, // 2 id 2 argcount 4 length
 };
 
 // FIXME: make non-global
 uint16_t program[100000];
-size_t prog_i = 0;
+uint32_t prog_i = 0;
 
 int tokenop_bindlevel(const char * source, Token * tokens, size_t count, size_t i)
 {
@@ -207,14 +216,14 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
         program[prog_i++] = PUSH_NAME;
         program[prog_i++] = -tokens[i].kind;
     }
-    if (tokens[i].kind == 1)
+    else if (tokens[i].kind == 1)
     {
         program[prog_i++] = PUSH_STRING;
         program[prog_i++] = 0;
         program[prog_i++] = 0;
-        memcpy(program - 2, &i, 4);
+        memcpy(program + prog_i - 2, &i, 4);
     }
-    if (tokens[i].kind == 0)
+    else if (tokens[i].kind == 0)
     {
         program[prog_i++] = PUSH_NUM;
         
@@ -226,7 +235,7 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
         
         program[prog_i++] = 0;
         program[prog_i++] = 0;
-        memcpy(program - 2, &f, 4);
+        memcpy(program + prog_i - 2, &f, 4);
     }
     
     return 1;
@@ -241,7 +250,7 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
     if (token_is(source, tokens, count, i, "(")) // wrapped expr
     {
         size_t ret = compile_expr(source, tokens, count, i+1, 0) + 1;
-        if (!token_is(source, tokens, count, i + ret, ")")) assert(((void)"Unterminated expression", 0));
+        if (!token_is(source, tokens, count, i + ret, ")")) panic("Unterminated expression");
         return ret + 1;
     }
     return compile_value(source, tokens, count, i++);
@@ -282,16 +291,12 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
     else if (token_is(source, tokens, count, i, "=="))
         inst = INST_EQ;
     else
-        assert(((void)"TODO", 0));
+        panic("TODO");
     program[prog_i++] = inst;
     return r + 1;
 }
 
-size_t compile_ifblock(const char * source, Token * tokens, size_t count, size_t i)
-{
-    assert(((void)"TODO ifblock", 0));
-}
-
+size_t compile_statementlist(const char * source, Token * tokens, size_t count, size_t i);
 size_t compile_statement(const char * source, Token * tokens, size_t count, size_t i)
 {
     if (i >= count) return 0;
@@ -299,34 +304,92 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
     if (tokens[i].kind == -1) // if
     {
         i += compile_expr(source, tokens, count, i+1, 0) + 1;
-        assert(i < count && tokens[i].kind == -11); // begin
+        assert(token_is(source, tokens, count, i, ":"));
         i++;
         program[prog_i++] = INST_IF;
         size_t jump_at = prog_i;
         program[prog_i++] = 0; // word 1
         program[prog_i++] = 0; // word 2
         
-        compile_ifblock(source, tokens, count, i);
+        i += compile_statementlist(source, tokens, count, i);
         assert(i < count);
         if (tokens[i].kind == -2 || tokens[i].kind == -3) // elif
         {
-            
+            panic("TODO 1");
         }
         else if (tokens[i].kind == -12) // end
         {
-            
+            memcpy(program + jump_at, &prog_i, 4);
+            i += 1;
         }
-        else assert(((void)"Missing end at end of if or if chain", 0));
+        else panic("Missing end at end of if or if chain");
+        
+        return i - orig_i;
     }
+    else if (tokens[i].kind == -12) // end
+    {
+        return i - orig_i;
+    }
+    else
+    {
+        printf("AT: [%.*s]\n", tokens[i].len, source + tokens[i].i);
+        panic("TODO");
+    }
+}
+size_t compile_statementlist(const char * source, Token * tokens, size_t count, size_t i)
+{
+    size_t orig_i = i;
+    size_t r;
+    while (1)
+    {
+        if (i >= count) break;
+        if (token_is(source, tokens, count, i, "\n")) { i += 1; continue; }
+        size_t r = compile_statement(source, tokens, count, i);
+        if (r == 0) break;
+        i += r;
+    }
+    return i - orig_i;
 }
 size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
 {
+    size_t orig_i = i;
     if (i >= count) return 0;
     if (tokens[i].kind >= -12) return 0;
     int16_t id = -tokens[i].kind;
     i += 1; // name
-    i += 1; // skip paren
+    if (!token_is(source, tokens, count, i, "(")) return 0;
+    i += 1; // (
+    int16_t args[256]; // at most 256 args per function
+    uint32_t j = 0;
+    while (1)
+    {
+        if (token_is(source, tokens, count, i, ")")) break;
+        
+        if (tokens[i].kind >= -12) return 0;
+        assert(j < 256);
+        args[j++] = -tokens[i].kind;
+        i += 1;
+        if (!(token_is(source, tokens, count, i, ")")
+              || token_is(source, tokens, count, i, ","))) return 0;
+        if (token_is(source, tokens, count, i, ",")) i++;
+    }
+    i += 1; // )
+    if (!token_is(source, tokens, count, i, ":")) return 0;
+    i += 1; // :
     
+    program[prog_i++] = INST_FUNCDEF;
+    program[prog_i++] = id;
+    program[prog_i++] = j;
+    size_t len_offs = prog_i;
+    program[prog_i++] = 0; // part 1 of length
+    program[prog_i++] = 0; // part 2 of length
+    
+    i += compile_statementlist(source, tokens, count, i);
+    
+    uint32_t len = prog_i - len_offs - 2;
+    memcpy(program + prog_i, &len, 4);
+    
+    return i - orig_i;
 }
 size_t compile(const char * source, Token * tokens, size_t count, size_t i)
 {
@@ -336,7 +399,14 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
         if (tokens[i].kind == -4) // func
         {
             size_t r = compile_func(source, tokens, count, i+1);
+            if (r == 0)
+                panic("function incomplete");
             i += r + 1;
+            
+            if (tokens[i].kind == -12) // end
+                i += 1;
+            else
+                panic("Functions must end with the end keyword");
         }
         else if (token_is(source, tokens, count, i, "\n"))
         {
@@ -344,7 +414,8 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
         }
         else
         {
-            perror("unexpected end of script: all root-level items must be function definitions");
+            printf("AT: [%.*s]\n", tokens[i].len, source + tokens[i].i);
+            panic("unexpected end of script: all root-level items must be function definitions");
             break;
         }
     }
@@ -394,8 +465,10 @@ int main(int argc, char ** argv)
     
     for (size_t i = 0; i < prog_i; i++)
     {
-        printf("%02X %02X\n", program[i] & 0xFF, program[i] >> 8);
+        //printf("%02X %02X\n", program[i] & 0xFF, program[i] >> 8);
+        printf("%04X\n", program[i]);
     }
     
+    puts("Done!");
     return 0;
 }

@@ -1,6 +1,5 @@
 
 func main():
     if (x == 5):
-        print("asdf")
     end
 end
