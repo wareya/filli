@@ -27,7 +27,11 @@ int16_t insert_or_lookup_id(const char * text, uint16_t len)
     {
         if (ids[j].len == 0)
         {
-            ids[j].where = text;
+            char * c = malloc(len+1);
+            memcpy(c, text, len);
+            c[len] = 0;
+            
+            ids[j].where = c;
             ids[j].len = len;
             return -j;
         }
@@ -74,7 +78,7 @@ Token * tokenize(const char * source, size_t * count)
     insert_or_lookup_id("end", 3);       // 12
     
     const char * long_punctuation[] = {
-        "==", "!=", ">=", "<=",
+        "==", "!=", ">=", "<=", "->",
     };
     
     size_t len = strlen(source);
@@ -160,23 +164,17 @@ Token * tokenize(const char * source, size_t * count)
     return ret;
 }
 
-typedef struct _Inst {
-    uint16_t op;
-    uint16_t args[2];
-} Inst;
-
 enum {
     INST_INVALID,
     INST_IF, INST_JMP,
     INST_ADD, INST_SUB, INST_MUL, INST_DIV,
     INST_EQ,
+    INST_FUNCDEF,
     PUSH_NUM, PUSH_STRING, PUSH_NAME,
 };
 
-Inst basic_inst(int n) { Inst ret; ret.op = n; ret.args[0] = 0; ret.args[1] = 0; return ret; }
-
 // FIXME: make non-global
-Inst program[100000];
+uint16_t program[100000];
 size_t prog_i = 0;
 
 int tokenop_bindlevel(const char * source, Token * tokens, size_t count, size_t i)
@@ -204,20 +202,32 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
     if (i >= count) return 0;
     if (tokens[i].kind > 1) return 0;
     
-    Inst n;
-    if (tokens[i].kind < 0) { n.op = PUSH_NAME; n.args[0] = -tokens[i].kind; }
-    if (tokens[i].kind == 1) { n.op = PUSH_STRING; memcpy(&n.args[0], &i, 4); }
+    if (tokens[i].kind < 0)
+    {
+        program[prog_i++] = PUSH_NAME;
+        program[prog_i++] = -tokens[i].kind;
+    }
+    if (tokens[i].kind == 1)
+    {
+        program[prog_i++] = PUSH_STRING;
+        program[prog_i++] = 0;
+        program[prog_i++] = 0;
+        memcpy(program - 2, &i, 4);
+    }
     if (tokens[i].kind == 0)
     {
-        n.op = PUSH_NUM;
+        program[prog_i++] = PUSH_NUM;
+        
         char * s = malloc(tokens[i].len + 1);
         memcpy(s, &source[tokens[i].i], tokens[i].len);
         s[tokens[i].len] = 0;
         float f = atof(s);
-        memcpy(&n.args[0], &f, 4);
         free(s);
+        
+        program[prog_i++] = 0;
+        program[prog_i++] = 0;
+        memcpy(program - 2, &f, 4);
     }
-    program[prog_i++] = n;
     
     return 1;
 }
@@ -264,13 +274,13 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
     int r = compile_expr(source, tokens, count, i + 1, binding_power);
     if (r == 0) return 0;
     
-    Inst inst = basic_inst(0);
+    uint16_t inst;
     if (token_is(source, tokens, count, i, "-"))
-        inst.op = INST_SUB;
+        inst = INST_SUB;
     else if (token_is(source, tokens, count, i, "+"))
-        inst.op = INST_DIV;
+        inst = INST_DIV;
     else if (token_is(source, tokens, count, i, "=="))
-        inst.op = INST_EQ;
+        inst = INST_EQ;
     else
         assert(((void)"TODO", 0));
     program[prog_i++] = inst;
@@ -291,8 +301,11 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         i += compile_expr(source, tokens, count, i+1, 0) + 1;
         assert(i < count && tokens[i].kind == -11); // begin
         i++;
+        program[prog_i++] = INST_IF;
         size_t jump_at = prog_i;
-        program[prog_i++] = basic_inst(INST_IF);
+        program[prog_i++] = 0; // word 1
+        program[prog_i++] = 0; // word 2
+        
         compile_ifblock(source, tokens, count, i);
         assert(i < count);
         if (tokens[i].kind == -2 || tokens[i].kind == -3) // elif
@@ -308,11 +321,12 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
 }
 size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
 {
-    puts("asdfjawe");
     if (i >= count) return 0;
-    puts("kgear");
     if (tokens[i].kind >= -12) return 0;
-    puts("egkjw35u");
+    int16_t id = -tokens[i].kind;
+    i += 1; // name
+    i += 1; // skip paren
+    
 }
 size_t compile(const char * source, Token * tokens, size_t count, size_t i)
 {
@@ -321,7 +335,8 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
     {
         if (tokens[i].kind == -4) // func
         {
-            i += compile_func(source, tokens, count, i+1) + 1;
+            size_t r = compile_func(source, tokens, count, i+1);
+            i += r + 1;
         }
         else if (token_is(source, tokens, count, i, "\n"))
         {
@@ -379,7 +394,7 @@ int main(int argc, char ** argv)
     
     for (size_t i = 0; i < prog_i; i++)
     {
-        printf("%04X %04X %04X\n", program[i].op, program[i].args[0], program[i].args[1]);
+        printf("%02X %02X\n", program[i] & 0xFF, program[i] >> 8);
     }
     
     return 0;
