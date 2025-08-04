@@ -1,5 +1,9 @@
 
-func main():
-    if (x == 5):
-    end
+let n = 1000000000
+let sum = 0
+let flip = -1
+for i in n:
+    flip = flip * -1
+    sum = sum + flip / (2 * i - 1)
 end
+print(sum * 4)

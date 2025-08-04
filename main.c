@@ -5,33 +5,23 @@
 
 float badstrtof(const char * s)
 {
+    if ((s[0]&~32) == 'N' && (s[1]&~32) == 'A' && (s[0]&~32) == 'N') return 0.0/0.0;
+    
     double sign = 1.0;
     if (*s == '-') { sign = -1.0; s += 1; }
-    
     if (!s[0]) return 0.0 * sign;
     
-    if (s[0] && s[1] && s[2])
-    {
-        if ((s[0]|32) == 'i' && (s[1]|32) == 'n' && (s[0]|32) == 'f') return sign/0.0;
-        if ((s[0]|32) == 'n' && (s[1]|32) == 'a' && (s[0]|32) == 'n') return 0.0/0.0;
-    }
+    if ((s[0]&~32) == 'I' && (s[1]&~32) == 'N' && (s[0]&~32) == 'F') return sign/0.0;
     
     double ret = 0.0;
     while (*s != 0 && *s != '.' && *s >= '0' && *s <= '9')
-    {
-        ret *= 10.0;
-        ret += *(s++) - '0';
-    }
+        ret = ret * 10.0 + (*(s++) - '0');
+    if (*(s++) != '.')
+        return ret * sign;
     
-    if (*(s++) == '.')
-    {
-        double f2 = 0.1;
-        while (*s != 0 && *s >= '0' && *s <= '9')
-        {
-            ret += (*(s++) - '0') * f2;
-            f2 *= 0.1;
-        }
-    }
+    double f2 = 0.1;
+    while (*s != 0 && *s >= '0' && *s <= '9')
+        (ret = ret + (*(s++) - '0') * f2), (f2 *= 0.1);
     
     return ret * sign;
 }
@@ -46,18 +36,12 @@ typedef struct _IdEntry {
     uint16_t len;
 } IdEntry;
 
-void prints(const char * s)
-{
-    fputs(s, stdout);
-}
-void eprints(const char * s)
-{
-    fputs(s, stderr);
-}
+void prints(const char * s) { fputs(s, stdout); }
+void eprints(const char * s) { fputs(s, stderr); }
 void printu16hex(uint16_t x)
 {
     char c[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
-    char s[5] = { c[(x>>12)&0xF], c[(x>>8)&15], c[(x>>4)&15], c[x&15], 0 };
+    char s[5] = { c[(x>>12)&15], c[(x>>8)&15], c[(x>>4)&15], c[x&15], 0 };
     prints(s);
 }
 void printsn(const char * s, size_t len)
@@ -69,21 +53,15 @@ void printsn(const char * s, size_t len)
 }
 
 #define die_now(X) { prints("Assert:\n" #X "\nat " LINE_STRING " in " __FILE__ "\n"); fflush(stdout); abort(); }
-#define assert(X) if (!(X)) { die_now(X) }
+#define assert(X, ...) { if (!(X)) { if (__VA_OPT__(1)+0) die_now(__VA_ARGS__) else die_now(X) } }
 #define perror(X) eprints(X)
-#define panic(...) die_now(__VA_OPT__((void) __VA_ARGS__))
+#define panic(...) die_now(__VA_OPT__( __VA_ARGS__))
 
 int16_t highest_ident_id = 0;
 int16_t insert_or_lookup_id(const char * text, uint16_t len)
 {
     // FIXME make non-static
-    static IdEntry ids[IDENTIFIER_COUNT];
-    static int init = 0;
-    if (!init)
-    {
-        init = 1;
-        memset(&ids[0], 0, sizeof(ids[0]) * IDENTIFIER_COUNT);
-    }
+    static IdEntry ids[IDENTIFIER_COUNT] = {};
     
     for (int16_t j = 1; j <= IDENTIFIER_COUNT; j++)
     {
@@ -100,9 +78,7 @@ int16_t insert_or_lookup_id(const char * text, uint16_t len)
             return -j;
         }
         else if (ids[j].len == len && strncmp(ids[j].where, text, len) == 0)
-        {
             return -j;
-        }
     }
     panic("Out of IDs");
 }
@@ -110,7 +86,7 @@ int16_t insert_or_lookup_id(const char * text, uint16_t len)
 typedef struct _Token {
     uint32_t i;
     uint16_t len;
-    int16_t kind; // negative: identifier. zero: number. one: string. two: punctuation. three: newline (if enabled as token).
+    int16_t kind; // negative: identifier. zero: number. one: string. two: punctuation. three: newline (if enabled).
 } Token;
 
 int token_is(const char * source, Token * tokens, size_t count, size_t i, const char * text)
@@ -123,10 +99,7 @@ int token_is(const char * source, Token * tokens, size_t count, size_t i, const 
 
 Token mk_token(uint32_t i, uint16_t len, int16_t kind)
 {
-    Token t;
-    t.i = i;
-    t.len = len;
-    t.kind = kind;
+    Token t = {i, len, kind};
     return t;
 }
 
@@ -179,10 +152,11 @@ Token * tokenize(const char * source, size_t * count)
         }
         
         // tokenize numbers
-        if (source[i] >= '0' && source[i] <= '9')
+        if ((source[i] >= '0' && source[i] <= '9') || (source[i] == '-' && source[i+1] >= '0' && source[i+1] <= '9'))
         {
             int dot_ok = 1;
             size_t start_i = i;
+            if (source[i] == '-') i += 1;
             while ((source[i] >= '0' && source[i] <= '9') || (dot_ok && source[i] == '.'))
             {
                 if (source[i++] == '.') dot_ok = 0;
@@ -244,14 +218,20 @@ enum {
     INST_EQ = 0x1000,
     INST_ADD, INST_SUB, INST_MUL, INST_DIV,
     // 2byte-op
-    PUSH_NAME = 0x2000,
+    PUSH_LOCAL = 0x2000,
+    PUSH_GLOBAL,
+    PUSH_FUNCNAME,
+    INST_ASSIGN,
+    INST_ASSIGN_GLOBAL,
     // 4byte-op
-    INST_IF = 0x3000, // destination
+    INST_IF = 0x4000, // destination
     INST_JMP, // destination
     PUSH_NUM, // f32
     PUSH_STRING, // token index
+    INST_FUNCDEF, // skip destination
+    INST_FORSTART, // var id (2), for slot (2)
     // 8byte-op
-    INST_FUNCDEF = 0x5000, // 2 id 2 argcount 4 length
+    INST_FOREND = 0x8000, // var id (2), for slot (2), destination (4)
 };
 
 // FIXME: make non-global
@@ -277,6 +257,13 @@ int tokenop_bindlevel(const char * source, Token * tokens, size_t count, size_t 
     return -1;
 }
 
+uint8_t in_global = 0;
+uint16_t funcs_registered[IDENTIFIER_COUNT] = {};
+uint8_t locals_registered[IDENTIFIER_COUNT] = {};
+uint8_t globals_registered[IDENTIFIER_COUNT] = {};
+
+uint8_t for_loop_index = 0;
+
 // returns number of consumed tokens
 size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t i)
 {
@@ -285,8 +272,13 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
     
     if (tokens[i].kind < 0)
     {
-        program[prog_i++] = PUSH_NAME;
-        program[prog_i++] = -tokens[i].kind;
+        if (!in_global && locals_registered[lex_ident_offset-tokens[i].kind])
+            program[prog_i++] = PUSH_LOCAL;
+        else if (globals_registered[lex_ident_offset-tokens[i].kind])
+            program[prog_i++] = PUSH_GLOBAL;
+        else if (funcs_registered[lex_ident_offset-tokens[i].kind])
+            program[prog_i++] = PUSH_FUNCNAME;
+        program[prog_i++] = lex_ident_offset-tokens[i].kind;
     }
     else if (tokens[i].kind == 1)
     {
@@ -322,7 +314,7 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
     if (token_is(source, tokens, count, i, "(")) // wrapped expr
     {
         size_t ret = compile_expr(source, tokens, count, i+1, 0) + 1;
-        if (!token_is(source, tokens, count, i + ret, ")")) panic("Unterminated expression");
+        if (!token_is(source, tokens, count, i + ret, ")")) panic("Unclosed parens");
         return ret + 1;
     }
     return compile_value(source, tokens, count, i++);
@@ -356,28 +348,26 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
     if (r == 0) return 0;
     
     uint16_t inst;
-    if (token_is(source, tokens, count, i, "-"))
-        inst = INST_SUB;
-    else if (token_is(source, tokens, count, i, "+"))
-        inst = INST_DIV;
-    else if (token_is(source, tokens, count, i, "=="))
-        inst = INST_EQ;
-    else
-        panic("TODO");
+    if (token_is(source, tokens, count, i, "-")) inst = INST_SUB;
+    else if (token_is(source, tokens, count, i, "/")) inst = INST_DIV;
+    else if (token_is(source, tokens, count, i, "+")) inst = INST_ADD;
+    else if (token_is(source, tokens, count, i, "*")) inst = INST_MUL;
+    else if (token_is(source, tokens, count, i, "==")) inst = INST_EQ;
+    else panic("TODO");
     program[prog_i++] = inst;
     return r + 1;
 }
 
 size_t compile_statementlist(const char * source, Token * tokens, size_t count, size_t i);
+
 size_t compile_statement(const char * source, Token * tokens, size_t count, size_t i)
 {
     if (i >= count) return 0;
     size_t orig_i = i;
     if (tokens[i].kind == -1) // if
     {
-        i += compile_expr(source, tokens, count, i+1, 0) + 1;
-        assert(token_is(source, tokens, count, i, ":"));
-        i++;
+        i += compile_expr(source, tokens, count, i + 1, 0) + 1;
+        assert(token_is(source, tokens, count, i++, ":"));
         program[prog_i++] = INST_IF;
         size_t jump_at = prog_i;
         program[prog_i++] = 0; // word 1
@@ -398,10 +388,111 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         
         return i - orig_i;
     }
+    else if (token_is(source, tokens, count, i, "let"))
+    {
+        if (++i >= count) return 0;
+        int16_t id = lex_ident_offset - tokens[i++].kind;
+        if (in_global)
+            globals_registered[id] = 1;
+        else
+            locals_registered[id] = 1;
+        if (token_is(source, tokens, count, i, "="))
+        {
+            size_t r = compile_expr(source, tokens, count, i + 1, 0);
+            if (r)
+            {
+                i += r + 1;
+                if (in_global)
+                    program[prog_i++] = INST_ASSIGN_GLOBAL;
+                else
+                    program[prog_i++] = INST_ASSIGN;
+                program[prog_i++] = id;
+            }
+        }
+        return i - orig_i;
+    }
+    else if (token_is(source, tokens, count, i, "for"))
+    {
+        if (++i >= count) return 0;
+        int16_t id = lex_ident_offset - tokens[i++].kind;
+        if (in_global)
+            globals_registered[id] = 1;
+        else
+            locals_registered[id] = 1;
+        assert(token_is(source, tokens, count, i++, "in"));
+        uint8_t idx = for_loop_index++;
+        if (in_global)
+            assert(for_loop_index != 0, "Too many for loops in global scope")
+        else
+            assert(for_loop_index != 0, "Too many for loops in function")
+        
+        size_t ret = compile_expr(source, tokens, count, i, 0);
+        assert(ret > 0, "For loop requires valid expression")
+        i += ret;
+        
+        program[prog_i++] = INST_FORSTART;
+        program[prog_i++] = id;
+        program[prog_i++] = idx;
+        
+        uint32_t head = prog_i;
+        
+        assert(token_is(source, tokens, count, i++, ":"));
+        
+        i += compile_statementlist(source, tokens, count, i);
+        assert(tokens[i++].kind == -12, "Missing end keyword");
+        
+        program[prog_i++] = INST_FOREND;
+        program[prog_i++] = id;
+        program[prog_i++] = idx;
+        program[prog_i++] = (head >> 16) & 0xFFFF;
+        program[prog_i++] = head & 0xFFFF;
+        return i - orig_i;
+    }
+    else if (i + 2 < count && tokens[i].kind < -lex_ident_offset
+             && token_is(source, tokens, count, i+1, "="))
+    {
+        int16_t id = lex_ident_offset - tokens[i++].kind;
+        i += 1; // =
+        
+        size_t ret = compile_expr(source, tokens, count, i, 0);
+        assert(ret > 0, "Assignment requires valid expression")
+        i += ret;
+        
+        if (!in_global && locals_registered[id])
+            program[prog_i++] = INST_ASSIGN;
+        else if (globals_registered[id])
+            program[prog_i++] = INST_ASSIGN_GLOBAL;
+        else
+            panic("Unknown variable");
+        program[prog_i++] = id;
+        return i - orig_i;
+    }
+    }
+    else if (i + 2 < count && tokens[i].kind < -lex_ident_offset
+             && token_is(source, tokens, count, i+1, "("))
+    {
+        int16_t id = lex_ident_offset - tokens[i++].kind;
+        i += 1; // (
+        
+        size_t ret = compile_expr(source, tokens, count, i, 0);
+        assert(ret > 0, "Assignment requires valid expression")
+        i += ret;
+        
+        if (!in_global && locals_registered[id])
+            program[prog_i++] = INST_ASSIGN;
+        else if (globals_registered[id])
+            program[prog_i++] = INST_ASSIGN_GLOBAL;
+        else
+            panic("Unknown variable");
+        program[prog_i++] = id;
+        return i - orig_i;
+    }
     else if (tokens[i].kind == -12) // end
     {
         return i - orig_i;
     }
+    else if (token_is(source, tokens, count, i, "\n"))
+        return 1;
     else
     {
         prints("AT: ");
@@ -409,7 +500,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         prints("\n");
         panic("TODO");
     }
-    panic("");
+    panic();
 }
 size_t compile_statementlist(const char * source, Token * tokens, size_t count, size_t i)
 {
@@ -418,7 +509,6 @@ size_t compile_statementlist(const char * source, Token * tokens, size_t count, 
     while (1)
     {
         if (i >= count) break;
-        if (token_is(source, tokens, count, i, "\n")) { i += 1; continue; }
         size_t r = compile_statement(source, tokens, count, i);
         if (r == 0) break;
         i += r;
@@ -427,10 +517,11 @@ size_t compile_statementlist(const char * source, Token * tokens, size_t count, 
 }
 size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
 {
+    memset(locals_registered, 0, sizeof(locals_registered));
     size_t orig_i = i;
     if (i >= count) return 0;
     if (tokens[i].kind >= -12) return 0;
-    int16_t id = -tokens[i].kind;
+    int16_t id = lex_ident_offset - tokens[i].kind;
     i += 1; // name
     if (!token_is(source, tokens, count, i, "(")) return 0;
     i += 1; // (
@@ -453,16 +544,15 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
     i += 1; // :
     
     program[prog_i++] = INST_FUNCDEF;
-    program[prog_i++] = id;
-    program[prog_i++] = j;
     size_t len_offs = prog_i;
     program[prog_i++] = 0; // part 1 of length
     program[prog_i++] = 0; // part 2 of length
     
     i += compile_statementlist(source, tokens, count, i);
     
-    uint32_t len = prog_i - len_offs - 2;
-    memcpy(program + prog_i, &len, 4);
+    memcpy(program + len_offs, &prog_i, 4);
+    
+    funcs_registered[id] = j;
     
     return i - orig_i;
 }
@@ -471,9 +561,10 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
     size_t orig_i = i;
     while (i < count)
     {
+        size_t r;
         if (tokens[i].kind == -4) // func
         {
-            size_t r = compile_func(source, tokens, count, i+1);
+            r = compile_func(source, tokens, count, i+1);
             if (r == 0)
                 panic("Incomplete function");
             i += r + 1;
@@ -482,9 +573,9 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
                 panic("Missing end keyword");
             i += 1;
         }
-        else if (token_is(source, tokens, count, i, "\n"))
+        else if ((r = compile_statement(source, tokens, count, i)))
         {
-            i += 1;
+            i += r;
         }
         else
         {
@@ -577,10 +668,7 @@ int main(int argc, char ** argv)
     
     for (size_t i = 0; i < prog_i; i++)
     {
-        //printf("%02X %02X\n", program[i] & 0xFF, program[i] >> 8);
-        //printf("%04X\n", program[i]);
         printu16hex(program[i]);
-        //fwrite(
         prints("\n");
     }
     
