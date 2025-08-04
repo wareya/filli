@@ -1,5 +1,5 @@
 
-let n = 1000000
+let n = 1000
 let sum = 0
 let flip = -1
 for i in n:

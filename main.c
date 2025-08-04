@@ -11,6 +11,40 @@
 
 // micro stdlib replacement stuff to reduce binary size (yes, this has a big effect)
 
+#define STRINGIZE2(x) #x
+#define STRINGIZE(x) STRINGIZE2(x)
+#define LINE_STRING STRINGIZE(__LINE__)
+
+#define die_now(X) { prints("Assert:\n" #X "\non " LINE_STRING " in " __FILE__ "\n"); fflush(stdout); abort(); }
+#define assert(X, ...) { if (!(X)) { if (__VA_OPT__(1)+0) die_now(__VA_ARGS__) else die_now(X) } }
+#define perror(X) eprints(X)
+#define panic(...) die_now(__VA_OPT__( __VA_ARGS__))
+
+char * stringdupn(const char * s, size_t len)
+{
+    char * s2 = (char *)malloc(len+1);
+    s2[len] = 0;
+    memcpy(s2, s, len);
+    return s2;
+}
+char * stringdup(const char * s)
+{
+    return stringdupn(s, strlen(s));
+}
+
+void prints(const char * s) { fputs(s, stdout); }
+void eprints(const char * s) { fputs(s, stderr); }
+void printu16hex(uint16_t x)
+{
+    char c[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
+    char s[5] = { c[(x>>12)&15], c[(x>>8)&15], c[(x>>4)&15], c[x&15], 0 };
+    prints(s);
+}
+void printsn(const char * s, size_t len)
+{
+    prints(stringdupn(s, len));
+}
+
 float badstrtof(const char * s)
 {
     if ((s[0]&~32) == 'N' && (s[1]&~32) == 'A' && (s[0]&~32) == 'N') return 0.0/0.0;
@@ -34,39 +68,44 @@ float badstrtof(const char * s)
     return ret * sign;
 }
 
-char * stringdupn(const char * s, size_t len)
+const char * badftostr(double f)
 {
-    char * s2 = (char *)malloc(len+1);
-    s2[len] = 0;
-    memcpy(s2, s, len);
-    return s2;
+    if (f != f) return "nan";
+    if (f+f == f) return "inf";
+    if (f-f == f) return "-inf";
+    
+    char buf[50] = {};
+    size_t i = 0;
+    
+    uint32_t pun;
+    memcpy(&pun, &f, 4);
+    if (pun & 0x80000000) buf[i++] = '-';
+    
+    size_t mag = 0;
+    while (f < 1000000000.0)
+    {
+        f *= 10.0;
+        mag += 1;
+    }
+    
+    uint64_t ipart = f;
+    uint8_t digits = 0;
+    uint64_t ipart2 = ipart;
+    while (ipart2) { digits++; ipart2 /= 10; }
+    if (digits == 0) digits = 1;
+    ipart2 = ipart;
+    for (size_t j = digits; j > 0;)
+    {
+        buf[--j] = '0' + (ipart2 % 10);
+        ipart2 /= 10;
+    }
+    
+    for (size_t j = digits; j > digits - mag; j--)
+        buf[j] = buf[j - 1];
+    buf[digits-mag] = '.';
+    
+    return stringdup(buf);
 }
-char * stringdup(const char * s)
-{
-    return stringdupn(s, strlen(s));
-}
-
-#define STRINGIZE2(x) #x
-#define STRINGIZE(x) STRINGIZE2(x)
-#define LINE_STRING STRINGIZE(__LINE__)
-
-void prints(const char * s) { fputs(s, stdout); }
-void eprints(const char * s) { fputs(s, stderr); }
-void printu16hex(uint16_t x)
-{
-    char c[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
-    char s[5] = { c[(x>>12)&15], c[(x>>8)&15], c[(x>>4)&15], c[x&15], 0 };
-    prints(s);
-}
-void printsn(const char * s, size_t len)
-{
-    prints(stringdupn(s, len));
-}
-
-#define die_now(X) { prints("Assert:\n" #X "\non " LINE_STRING " in " __FILE__ "\n"); fflush(stdout); abort(); }
-#define assert(X, ...) { if (!(X)) { if (__VA_OPT__(1)+0) die_now(__VA_ARGS__) else die_now(X) } }
-#define perror(X) eprints(X)
-#define panic(...) die_now(__VA_OPT__( __VA_ARGS__))
 
 // actual program
 
@@ -665,7 +704,15 @@ typedef struct _Frame {
 
 void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
 {
-    printf("%f\n", frame->stack[frame->stackpos - 1].u.f);
+    if (id == lex_ident_offset - insert_or_lookup_id("print", 5))
+    {
+        for (size_t i = 0; i < argcount; i++)
+            //printf("%f ", frame->stack[frame->stackpos - 1 - i].u.f);
+            prints(badftostr(frame->stack[frame->stackpos - 1 - i].u.f));
+        prints("\n");
+    }
+    else
+        panic("Unknown internal function");
 }
 void interpret(void)
 {
