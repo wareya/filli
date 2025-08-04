@@ -15,7 +15,8 @@
 #define STRINGIZE(x) STRINGIZE2(x)
 #define LINE_STRING STRINGIZE(__LINE__)
 
-#define die_now(X) { prints("Assert:\n" #X "\non " LINE_STRING " in " __FILE__ "\n"); fflush(stdout); abort(); }
+#define just_die() __builtin_abort()
+#define die_now(X) { prints("Assert:\n" #X "\non " LINE_STRING " in " __FILE__ "\n"); fflush(stdout); just_die(); }
 #define assert(X, ...) { if (!(X)) { if (__VA_OPT__(1)+0) die_now(__VA_ARGS__) else die_now(X) } }
 #define perror(X) eprints(X)
 #define panic(...) die_now(__VA_OPT__( __VA_ARGS__))
@@ -179,6 +180,7 @@ Token * tokenize(const char * source, size_t * count)
     
     const char * long_punctuation[] = {
         "==", "!=", ">=", "<=", "->",
+        "+=", "-=", "*=", "/="
     };
     
     size_t len = strlen(source);
@@ -268,16 +270,24 @@ Token * tokenize(const char * source, size_t * count)
 enum {
     INST_INVALID,
     // zero-op
-    INST_EQ = 0x1000,
+    INST_EQ = 0x100,
     INST_ADD, INST_SUB, INST_MUL, INST_DIV,
     // 2byte-op
-    PUSH_LOCAL = 0x2000,
+    PUSH_LOCAL = 0x200,
     PUSH_GLOBAL,
     PUSH_FUNCNAME,
     INST_ASSIGN,
     INST_ASSIGN_GLOBAL,
+    INST_ASSIGN_ADD,
+    INST_ASSIGN_GLOBAL_ADD,
+    INST_ASSIGN_SUB,
+    INST_ASSIGN_GLOBAL_SUB,
+    INST_ASSIGN_MUL,
+    INST_ASSIGN_GLOBAL_MUL,
+    INST_ASSIGN_DIV,
+    INST_ASSIGN_GLOBAL_DIV,
     // 4byte-op
-    INST_IF = 0x3000, // destination
+    INST_IF = 0x300, // destination
     INST_JMP, // destination
     PUSH_NUM, // f32
     PUSH_STRING, // token index
@@ -285,7 +295,7 @@ enum {
     INST_FORSTART, // var id (2), for slot (2)
     INST_FUNCCALL, // func id, arg count
     // 8byte-op
-    INST_FOREND = 0x5000, // var id (2), for slot (2), destination (4)
+    INST_FOREND = 0x500, // var id (2), for slot (2), destination (4)
 };
 
 // FIXME: make non-global
@@ -510,8 +520,16 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         return i - orig_i;
     }
     else if (i + 2 < count && tokens[i].kind < -lex_ident_offset
-             && token_is(source, tokens, count, i+1, "="))
+             && (token_is(source, tokens, count, i+1, "=")
+                 || token_is(source, tokens, count, i+1, "+=")
+                 || token_is(source, tokens, count, i+1, "-=")
+                 || token_is(source, tokens, count, i+1, "*=")
+                 || token_is(source, tokens, count, i+1, "/=")
+            ))
     {
+        const char * opstr = stringdupn(source + tokens[i+1].i, tokens[i+1].len);
+        size_t oplen = tokens[i+1].len;
+        
         int16_t id = lex_ident_offset - tokens[i++].kind;
         i += 1; // =
         
@@ -519,12 +537,36 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         assert(ret > 0, "Assignment requires valid expression")
         i += ret;
         
-        if (!in_global && locals_registered[id])
-            program[prog_i++] = INST_ASSIGN;
-        else if (globals_registered[id])
-            program[prog_i++] = INST_ASSIGN_GLOBAL;
-        else
-            panic("Unknown variable");
+        uint8_t isglobal;
+        if (!in_global && locals_registered[id]) isglobal = 0;
+        else if (globals_registered[id]) isglobal = 1;
+        else panic("Unknown variable");
+        
+        if (strncmp(opstr, "=", oplen) == 0)
+        {
+            if (!isglobal) program[prog_i++] = INST_ASSIGN;
+            else           program[prog_i++] = INST_ASSIGN_GLOBAL;
+        }
+        else if (strncmp(opstr, "+=", oplen) == 0)
+        {
+            if (!isglobal) program[prog_i++] = INST_ASSIGN_ADD;
+            else           program[prog_i++] = INST_ASSIGN_GLOBAL_ADD;
+        }
+        else if (strncmp(opstr, "-=", oplen) == 0)
+        {
+            if (!isglobal) program[prog_i++] = INST_ASSIGN_SUB;
+            else           program[prog_i++] = INST_ASSIGN_GLOBAL_SUB;
+        }
+        else if (strncmp(opstr, "*=", oplen) == 0)
+        {
+            if (!isglobal) program[prog_i++] = INST_ASSIGN_MUL;
+            else           program[prog_i++] = INST_ASSIGN_GLOBAL_MUL;
+        }
+        else if (strncmp(opstr, "/=", oplen) == 0)
+        {
+            if (!isglobal) program[prog_i++] = INST_ASSIGN_DIV;
+            else           program[prog_i++] = INST_ASSIGN_GLOBAL_DIV;
+        }
         program[prog_i++] = id;
         return i - orig_i;
     }
@@ -714,13 +756,22 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
     else
         panic("Unknown internal function");
 }
+
+void print_op_and_panic(uint16_t op)
+{
+    prints("---\n");
+    printu16hex(op);
+    prints("\n---\n");
+    panic("TODO");
+}
+
 void interpret(void)
 {
     Frame * frame = (Frame *)malloc(sizeof(Frame));
+    if (!frame) panic("Out of memory");
     
     Frame * global_frame = frame;
     
-    if (!frame) panic("Out of memory");
     memset(frame, 0, sizeof(Frame));
     while (frame->pc < prog_i)
     {
@@ -740,9 +791,7 @@ void interpret(void)
                 frame->stackpos -= argcount;
             }
             else
-            {
                 panic("TODO funccall");
-            }
         } break;
         case PUSH_NUM: {
             float f;
@@ -758,6 +807,26 @@ void interpret(void)
             uint16_t id = program[frame->pc + 1];
             global_frame->vars[id] = v;
         } break;
+        case INST_ASSIGN_GLOBAL_ADD:
+        case INST_ASSIGN_GLOBAL_SUB:
+        case INST_ASSIGN_GLOBAL_MUL:
+        case INST_ASSIGN_GLOBAL_DIV:
+        {
+            Value v2 = frame->stack[--frame->stackpos];
+            uint16_t id = program[frame->pc + 1];
+            Value v1 = global_frame->vars[id];
+            
+            assert(v2.tag == VALUE_FLOAT
+                    && v1.tag == VALUE_FLOAT, "Math only works on numbers");
+            
+            Value v3;
+            if (op == INST_ASSIGN_GLOBAL_ADD) v3 = val_float(v1.u.f + v2.u.f);
+            if (op == INST_ASSIGN_GLOBAL_SUB) v3 = val_float(v1.u.f - v2.u.f);
+            if (op == INST_ASSIGN_GLOBAL_MUL) v3 = val_float(v1.u.f * v2.u.f);
+            if (op == INST_ASSIGN_GLOBAL_DIV) v3 = val_float(v1.u.f / v2.u.f);
+            
+            global_frame->vars[id] = v3;
+        } break;
         case INST_ADD:
         case INST_SUB:
         case INST_MUL:
@@ -765,8 +834,8 @@ void interpret(void)
         {
             Value v2 = frame->stack[--frame->stackpos];
             Value v1 = frame->stack[--frame->stackpos];
-            assert(v2.tag == VALUE_FLOAT, "Math only works on numbers");
-            assert(v1.tag == VALUE_FLOAT, "Math only works on numbers");
+            assert(v2.tag == VALUE_FLOAT
+                    && v1.tag == VALUE_FLOAT, "Math only works on numbers");
             Value v3;
             //printf("doing op %04X with %f and %f\n", INST_ADD, v1.u.f, v2.u.f);
             if (op == INST_ADD) v3 = val_float(v1.u.f + v2.u.f);
@@ -803,13 +872,10 @@ void interpret(void)
             }
         } break;
         default: {
-            prints("---\n");
-            printu16hex(op);
-            prints("\n---\n");
-            panic("TODO");
+            print_op_and_panic(op);
         } break;
         }
-        frame->pc += op >> 12;
+        frame->pc += op >> 8;
     }
 }
 
