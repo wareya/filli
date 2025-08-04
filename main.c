@@ -57,18 +57,13 @@ double badstrtod(const char * s)
     double sign = 1.0;
     if (*s == '-') { sign = -1.0; s += 1; }
     if (!s[0]) return 0.0 * sign;
-    
-    if ((s[0]&~32) == 'I' && (s[1]&~32) == 'N' && (s[0]&~32) == 'F')
-        return sign/0.0;
+    if ((s[0]&~32) == 'I' && (s[1]&~32) == 'N' && (s[0]&~32) == 'F') return sign/0.0;
     
     double ret = 0.0;
-    while (*s != 0 && *s != '.' && *s >= '0' && *s <= '9')
-        ret = ret * 10.0 + (*(s++) - '0');
+    while (*s != 0 && *s != '.' && *s >= '0' && *s <= '9') { ret = ret*10.0 + (*(s++) - '0'); }
     if (*(s++) != '.') return ret * sign;
-    
     double f2 = 0.1;
-    while (*s != 0 && *s >= '0' && *s <= '9')
-        (ret = ret + (*(s++) - '0') * f2), (f2 *= 0.1);
+    while (*s != 0 && *s >= '0' && *s <= '9') { ret += (*(s++) - '0') * f2; f2 *= 0.1; }
     
     return ret * sign;
 }
@@ -84,22 +79,20 @@ const char * badftostr(double f)
     
     uint64_t pun;
     memcpy(&pun, &f, 8);
-    if (pun & 0x8000000000000000) buf[i++] = '-';
-    pun &= ~0x8000000000000000;
+    if (pun & 0x8000000000000000) { buf[i++] = '-'; pun ^= 0x8000000000000000; }
     memcpy(&f, &pun, 8);
     
-    size_t mag = 0;
-    while (f < 1000000000.0) { f *= 10.0; mag++; }
+    size_t mag = 0; while (f < 1000000000.0) { f *= 10.0; mag++; }
     
     uint64_t fi2 = f;
-    uint8_t digits = i;
-    while (fi2) { digits++; fi2 /= 10; }
-    if (digits == 0) digits = 1;
-    fi2 = f;
+    uint8_t d = i;
+    while (fi2) { d++; fi2 /= 10; }
+    if (d == i) d += 1;
     
-    for (size_t j = digits; j > i;) { buf[--j] = '0' + (fi2 % 10); fi2 /= 10; }
-    for (size_t j = digits; j > digits - mag; j--) buf[j] = buf[j - 1];
-    buf[digits-mag] = '.';
+    fi2 = f;
+    for (size_t j = d; j > i;) { buf[--j] = '0' + (fi2 % 10); fi2 /= 10; }
+    for (size_t j = d; j > d - mag; j--) buf[j] = buf[j - 1];
+    buf[d-mag] = '.';
     
     return stringdup(buf);
 }
@@ -122,7 +115,6 @@ int16_t insert_or_lookup_id(const char * text, uint16_t len)
         {
             ids[j].where = stringdupn(text, len);
             ids[j].len = len;
-            
             highest_ident_id = j;
             return -j;
         }
@@ -205,7 +197,8 @@ Token * tokenize(const char * source, size_t * count)
         }
         
         // tokenize numbers
-        if ((source[i] >= '0' && source[i] <= '9') || (source[i] == '-' && source[i+1] >= '0' && source[i+1] <= '9'))
+        if ((source[i] >= '0' && source[i] <= '9')
+            || (source[i] == '-' && source[i+1] >= '0' && source[i+1] <= '9'))
         {
             int dot_ok = 1;
             size_t start_i = i;
@@ -221,8 +214,7 @@ Token * tokenize(const char * source, size_t * count)
             size_t start_i = i;
             i++;
             while ((source[i] >= 'a' && source[i] <= 'z') || (source[i] >= 'A' && source[i] <= 'Z')
-                   || source[i] == '_' || (source[i] >= '0' && source[i] <= '9')
-                  )
+                   || source[i] == '_' || (source[i] >= '0' && source[i] <= '9'))
                 i++;
             
             ret[t++] = mk_token(start_i, i-start_i, insert_or_lookup_id(source + start_i, i - start_i));
@@ -406,10 +398,8 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
         i += 1; // [
         
         uint16_t j = 0;
-        while (1)
+        while (!token_is(source, tokens, count, i, "]"))
         {
-            if (token_is(source, tokens, count, i, "]")) break;
-            
             size_t r = compile_expr(source, tokens, count, i, 0);
             if (r == 0) return 0;
             assert(j++ < 32000, "Too many values in array literal (limit is 32000)");
@@ -431,7 +421,6 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
 size_t compile_expr(const char * source, Token * tokens, size_t count, size_t i, int right_bind_power)
 {
     if (i >= count) return 0;
-    
     size_t ret = compile_innerexpr(source, tokens, count, i);
     if (ret == 0) return 0;
     i += ret;
@@ -449,21 +438,16 @@ size_t compile_expr(const char * source, Token * tokens, size_t count, size_t i,
 size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t i)
 {
     if (i >= count) return 0;
-    
     int binding_power = tokenop_bindlevel(source, tokens, count, i);
     if (binding_power < 0) return 0;
     
     // func calls
     if (token_is(source, tokens, count, i, "("))
     {
-        size_t orig_i = i;
-        i += 1; // (
-        
+        size_t orig_i = i++; // (
         uint16_t j = 0;
-        while (1)
+        while (!token_is(source, tokens, count, i, ")"))
         {
-            if (token_is(source, tokens, count, i, ")")) break;
-            
             size_t r = compile_expr(source, tokens, count, i, 0);
             if (r == 0) return 0;
             assert(j++ < 256, "Too many arguments to function (limit is 256)");
@@ -546,8 +530,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
             {
                 i += r + 1;
                 program[prog_i++] = INST_ASSIGN;
-                if (in_global)
-                    program[prog_i - 1] += 1;
+                if (in_global) program[prog_i - 1] += 1;
                 program[prog_i++] = id;
             }
         }
@@ -630,10 +613,8 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         i += 1; // (
         
         uint16_t j = 0;
-        while (1)
+        while (!token_is(source, tokens, count, i, ")"))
         {
-            if (token_is(source, tokens, count, i, ")")) break;
-            
             size_t r = compile_expr(source, tokens, count, i, 0);
             if (r == 0) return 0;
             assert(j++ < 256, "Too many arguments to function (limit is 256)");
@@ -749,44 +730,18 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
 }
 
 struct _Value;
-typedef struct _Array {
-    struct _Value * buf;
-    size_t len;
-    size_t cap;
-} Array;
+typedef struct _Array { struct _Value * buf; size_t len; size_t cap; } Array;
 
+enum { VALUE_FLOAT, VALUE_ARRAY, VALUE_STRING }; // tag
 typedef struct _Value {
     union { double f; Array * a; char * s; } u;
     uint8_t tag;
 } Value;
 
-enum {
-    VALUE_FLOAT,
-    VALUE_ARRAY,
-    VALUE_STRING,
-};
+Value array_get(Array * a, size_t i) { assert(i < a->len); return a->buf[i]; }
 
-Value array_get(Array * a, size_t i)
-{
-    assert(i < a->len);
-    return a->buf[i];
-}
-
-Value val_float(double f)
-{
-    Value v;
-    v.tag = VALUE_FLOAT;
-    v.u.f = f;
-    return v;
-}
-
-Value val_string(char * s)
-{
-    Value v;
-    v.tag = VALUE_STRING;
-    v.u.s = s;
-    return v;
-}
+Value val_float(double f) { Value v; v.tag = VALUE_FLOAT; v.u.f = f; return v; }
+Value val_string(char * s) { Value v; v.tag = VALUE_STRING; v.u.s = s; return v; }
 
 typedef struct _Frame {
     size_t pc;
@@ -895,13 +850,13 @@ void interpret(void)
             Value v1 = global_frame->vars[id];\
             assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
             
-        NEXT_CASE(INST_ASSIGN_GLOBAL_ADD) GLOBAL_MATH_SHARED()
+        NEXT_CASE(INST_ASSIGN_GLOBAL_ADD)   GLOBAL_MATH_SHARED()
             global_frame->vars[id] = val_float(v1.u.f + v2.u.f);
-        NEXT_CASE(INST_ASSIGN_GLOBAL_SUB) GLOBAL_MATH_SHARED()
+        NEXT_CASE(INST_ASSIGN_GLOBAL_SUB)   GLOBAL_MATH_SHARED()
             global_frame->vars[id] = val_float(v1.u.f - v2.u.f);
-        NEXT_CASE(INST_ASSIGN_GLOBAL_MUL) GLOBAL_MATH_SHARED()
+        NEXT_CASE(INST_ASSIGN_GLOBAL_MUL)   GLOBAL_MATH_SHARED()
             global_frame->vars[id] = val_float(v1.u.f * v2.u.f);
-        NEXT_CASE(INST_ASSIGN_GLOBAL_DIV) GLOBAL_MATH_SHARED()
+        NEXT_CASE(INST_ASSIGN_GLOBAL_DIV)   GLOBAL_MATH_SHARED()
             global_frame->vars[id] = val_float(v1.u.f / v2.u.f);
         
         #define MATH_SHARED()\
@@ -909,13 +864,13 @@ void interpret(void)
             Value v1 = frame->stack[--frame->stackpos];\
             assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
         
-        NEXT_CASE(INST_ADD) MATH_SHARED()
+        NEXT_CASE(INST_ADD)   MATH_SHARED()
             frame->stack[frame->stackpos++] = val_float(v1.u.f + v2.u.f);
-        NEXT_CASE(INST_SUB) MATH_SHARED()
+        NEXT_CASE(INST_SUB)   MATH_SHARED()
             frame->stack[frame->stackpos++] = val_float(v1.u.f - v2.u.f);
-        NEXT_CASE(INST_MUL) MATH_SHARED()
+        NEXT_CASE(INST_MUL)   MATH_SHARED()
             frame->stack[frame->stackpos++] = val_float(v1.u.f * v2.u.f);
-        NEXT_CASE(INST_DIV) MATH_SHARED()
+        NEXT_CASE(INST_DIV)   MATH_SHARED()
             frame->stack[frame->stackpos++] = val_float(v1.u.f / v2.u.f);
         
         NEXT_CASE(INST_FORSTART)
@@ -929,18 +884,12 @@ void interpret(void)
             frame->vars[id] = val_float(0.0f);
         NEXT_CASE(INST_FOREND)
             uint16_t id = program[frame->pc + 1];
+            assert(frame->vars[id].tag == VALUE_FLOAT, "For loops can only operate on numbers");
             uint16_t idx = program[frame->pc + 2];
             uint32_t target;
             memcpy(&target, program + (frame->pc + 3), 4);
-            
-            double limit = frame->forloops[idx];
-            
-            Value v = frame->vars[id];
-            assert(v.tag == VALUE_FLOAT, "For loops can only operate on numbers");
-            
-            v.u.f += 1.0f;
-            frame->vars[id] = v;
-            if (v.u.f < limit)
+            frame->vars[id].u.f += 1.0f;
+            if (frame->vars[id].u.f < frame->forloops[idx])
             {
                 frame->pc = target;
                 continue;
@@ -999,7 +948,6 @@ int main(int argc, char ** argv)
 #ifdef USE_GC
     GC_INIT();
 #endif
-    
     lex_init();
     register_intrinsic_func("print");
     
@@ -1013,10 +961,8 @@ int main(int argc, char ** argv)
     if (!source) { perror("Out of memory"); return 1; }
     
     FILE * file;
-    if (strcmp(argv[1], "-") == 0)
-        file = stdin;
-    else
-        file = fopen(argv[1], "rb");
+    if (strcmp(argv[1], "-") == 0) file = stdin;
+    else file = fopen(argv[1], "rb");
     
     if (!file) { perror("Error reading file"); return 1; }
     
@@ -1034,12 +980,10 @@ int main(int argc, char ** argv)
     }
     if (ferror(file)) { perror("Error reading file"); return 1; }
     fclose(file);
-    
     source[total_size] = 0;
     
     size_t count = 0;
     Token * tokens = tokenize(source, &count);
-    
     compile(source, tokens, count, 0);
     
     for (size_t i = 0; i < prog_i; i++)
