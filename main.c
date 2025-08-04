@@ -46,7 +46,7 @@ void printsn(const char * s, size_t len)
     prints(stringdupn(s, len));
 }
 
-float badstrtof(const char * s)
+double badstrtod(const char * s)
 {
     if ((s[0]&~32) == 'N' && (s[1]&~32) == 'A' && (s[0]&~32) == 'N') return 0.0/0.0;
     
@@ -67,6 +67,11 @@ float badstrtof(const char * s)
         (ret = ret + (*(s++) - '0') * f2), (f2 *= 0.1);
     
     return ret * sign;
+}
+
+float badstrtof(const char * s)
+{
+    return badstrtod(s);
 }
 
 const char * badftostr(double f)
@@ -289,13 +294,13 @@ enum {
     // 2-op
     INST_IF = 0x320, // destination
     INST_JMP, // destination
-    PUSH_NUM, // f32
     PUSH_STRING, // token index
     INST_FUNCDEF, // skip destination
     INST_FORSTART, // var id (2), for slot (2)
     INST_FUNCCALL, // func id, arg count
     // 4-op
     INST_FOREND = 0x530, // var id (2), for slot (2), destination (4)
+    PUSH_NUM, // f64
 };
 
 #define INSTRUCTIONS_XMACRO(X) \
@@ -392,12 +397,14 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
         program[prog_i++] = PUSH_NUM;
         
         char * s = stringdupn(source + tokens[i].i, tokens[i].len);
-        float f = badstrtof(s);
+        double f = badstrtod(s);
         free(s);
         
         program[prog_i++] = 0;
         program[prog_i++] = 0;
-        memcpy(program + prog_i - 2, &f, 4);
+        program[prog_i++] = 0;
+        program[prog_i++] = 0;
+        memcpy(program + prog_i - 4, &f, 8);
     }
     
     return 1;
@@ -743,7 +750,7 @@ typedef struct _Array {
 } Array;
 
 typedef struct _Value {
-    union { float f; Array * a; } u;
+    union { double f; Array * a; } u;
     uint8_t tag;
 } Value;
 
@@ -752,7 +759,7 @@ enum {
     VALUE_ARRAY,
 };
 
-Value val_float(float f)
+Value val_float(double f)
 {
     Value v;
     v.tag = VALUE_FLOAT;
@@ -761,7 +768,7 @@ Value val_float(float f)
 }
 
 typedef struct _Forloop {
-    float limit;
+    double limit;
 } Forloop;
 
 typedef struct _Frame {
@@ -871,8 +878,8 @@ void interpret(void)
             else
                 panic("TODO funccall");
         NEXT_CASE(PUSH_NUM)
-            float f;
-            memcpy(&f, program + frame->pc + 1, 4);
+            double f;
+            memcpy(&f, program + frame->pc + 1, 8);
             frame->stack[frame->stackpos++] = val_float(f);
         NEXT_CASE(PUSH_GLOBAL)
             uint16_t id = program[frame->pc + 1];
@@ -942,7 +949,7 @@ void interpret(void)
             uint32_t target;
             memcpy(&target, program + (frame->pc + 3), 4);
             
-            float limit = frame->forloops[idx].limit;
+            double limit = frame->forloops[idx].limit;
             
             Value v = frame->vars[id];
             assert(v.tag == VALUE_FLOAT, "For loops can only operate on numbers");
@@ -1013,6 +1020,7 @@ int main(int argc, char ** argv)
     
     size_t count = 0;
     Token * tokens = tokenize(source, &count);
+    
     for (size_t i = 0; i < count; i++)
     {
         prints("[");
