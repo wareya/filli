@@ -808,7 +808,7 @@ void interpret(void)
     
     Frame * global_frame = frame;
 
-//#define USE_LOOP_DISPATCH
+#define USE_LOOP_DISPATCH
 
 #ifdef USE_LOOP_DISPATCH
     
