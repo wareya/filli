@@ -272,8 +272,8 @@ enum {
     // zero-op
     INST_EQ = 0x100,
     INST_ADD, INST_SUB, INST_MUL, INST_DIV,
-    // 2byte-op
-    PUSH_LOCAL = 0x200,
+    // 1-op
+    PUSH_LOCAL = 0x210,
     PUSH_GLOBAL,
     PUSH_FUNCNAME,
     INST_ASSIGN,
@@ -286,17 +286,46 @@ enum {
     INST_ASSIGN_GLOBAL_MUL,
     INST_ASSIGN_DIV,
     INST_ASSIGN_GLOBAL_DIV,
-    // 4byte-op
-    INST_IF = 0x300, // destination
+    // 2-op
+    INST_IF = 0x320, // destination
     INST_JMP, // destination
     PUSH_NUM, // f32
     PUSH_STRING, // token index
     INST_FUNCDEF, // skip destination
     INST_FORSTART, // var id (2), for slot (2)
     INST_FUNCCALL, // func id, arg count
-    // 8byte-op
-    INST_FOREND = 0x500, // var id (2), for slot (2), destination (4)
+    // 4-op
+    INST_FOREND = 0x530, // var id (2), for slot (2), destination (4)
 };
+
+#define INSTRUCTIONS_XMACRO(X) \
+    INST_XXXX(INST_INVALID)\
+    INST_XXXX(INST_EQ)\
+    INST_XXXX(INST_ADD)\
+    INST_XXXX(INST_SUB)\
+    INST_XXXX(INST_MUL)\
+    INST_XXXX(INST_DIV)\
+    INST_XXXX(PUSH_LOCAL)\
+    INST_XXXX(PUSH_GLOBAL)\
+    INST_XXXX(PUSH_FUNCNAME)\
+    INST_XXXX(INST_ASSIGN)\
+    INST_XXXX(INST_ASSIGN_GLOBAL)\
+    INST_XXXX(INST_ASSIGN_ADD)\
+    INST_XXXX(INST_ASSIGN_GLOBAL_ADD)\
+    INST_XXXX(INST_ASSIGN_SUB)\
+    INST_XXXX(INST_ASSIGN_GLOBAL_SUB)\
+    INST_XXXX(INST_ASSIGN_MUL)\
+    INST_XXXX(INST_ASSIGN_GLOBAL_MUL)\
+    INST_XXXX(INST_ASSIGN_DIV)\
+    INST_XXXX(INST_ASSIGN_GLOBAL_DIV)\
+    INST_XXXX(INST_IF)\
+    INST_XXXX(INST_JMP)\
+    INST_XXXX(PUSH_NUM)\
+    INST_XXXX(PUSH_STRING)\
+    INST_XXXX(INST_FUNCDEF)\
+    INST_XXXX(INST_FORSTART)\
+    INST_XXXX(INST_FUNCCALL)\
+    INST_XXXX(INST_FOREND)
 
 // FIXME: make non-global
 uint16_t program[PROGRAM_MAXLEN];
@@ -771,17 +800,66 @@ void interpret(void)
     if (!frame) panic("Out of memory");
     
     Frame * global_frame = frame;
+
+//#define USE_LOOP_DISPATCH
+
+#ifdef USE_LOOP_DISPATCH
     
+    #define CASES_START() \
+    while (1) {\
+        uint16_t opraw = program[frame->pc];\
+        uint16_t op = opraw;\
+        switch (op) {
+    #define CASES_END() } }
+    
+    #define MARK_CASE(X) case X: {
+    #define END_CASE() frame->pc += op >> 8; continue; }
+    #define DECAULT_CASE() default: print_op_and_panic(op);
+    
+    #define NEXT_CASE(X) END_CASE() MARK_CASE(X)
+
+#else
+    
+    void ** handlers[0xFF];
+    for (size_t i = 0; i < 0xFF; i++)
+        handlers[i] = &&_handler_default;
+    
+    #define CASE_INSTALL(X) handlers[X & 0xFF] = &&_handler_##X;
+    
+    #define INST_XXXX CASE_INSTALL
+    INSTRUCTIONS_XMACRO()
+    
+    uint16_t opraw;
+    uint16_t op;
+    
+    #define CASES_HANDLE() \
+        if (frame->pc >= prog_i) return;\
+        opraw = program[frame->pc];\
+        op = opraw & 0xFF; \
+        goto *handlers[op];
+    
+    #define CASES_START() \
+    while (1) { CASES_HANDLE()
+    
+    #define CASES_END() }
+    
+    #define MARK_CASE(X) _handler_##X: {
+    #define END_CASE() frame->pc += opraw >> 8; CASES_HANDLE(); }
+    #define DECAULT_CASE() _handler_default: print_op_and_panic(opraw);
+    
+    #define NEXT_CASE(X) END_CASE() MARK_CASE(X)
+
+#endif
+
     memset(frame, 0, sizeof(Frame));
-    while (frame->pc < prog_i)
-    {
-        uint16_t op = program[frame->pc];
-        switch (op)
-        {
-        case INST_FUNCDEF: {
+    
+    CASES_START()
+        
+        MARK_CASE(INST_INVALID)
+            return;
+        NEXT_CASE(INST_FUNCDEF)
             panic("TODO funcdef");
-        } break;
-        case INST_FUNCCALL: {
+        NEXT_CASE(INST_FUNCCALL)
             uint16_t id = program[frame->pc + 1];
             uint16_t argcount = program[frame->pc + 2];
             assert(funcs_registered[id].exists);
@@ -792,67 +870,73 @@ void interpret(void)
             }
             else
                 panic("TODO funccall");
-        } break;
-        case PUSH_NUM: {
+        NEXT_CASE(PUSH_NUM)
             float f;
             memcpy(&f, program + frame->pc + 1, 4);
             frame->stack[frame->stackpos++] = val_float(f);
-        } break;
-        case PUSH_GLOBAL: {
+        NEXT_CASE(PUSH_GLOBAL)
             uint16_t id = program[frame->pc + 1];
             frame->stack[frame->stackpos++] = global_frame->vars[id];
-        } break;
-        case INST_ASSIGN_GLOBAL: {
+        
+        NEXT_CASE(INST_ASSIGN_GLOBAL)
             Value v = frame->stack[--frame->stackpos];
             uint16_t id = program[frame->pc + 1];
             global_frame->vars[id] = v;
-        } break;
-        case INST_ASSIGN_GLOBAL_ADD:
-        case INST_ASSIGN_GLOBAL_SUB:
-        case INST_ASSIGN_GLOBAL_MUL:
-        case INST_ASSIGN_GLOBAL_DIV:
-        {
+        
+        NEXT_CASE(INST_ASSIGN_GLOBAL_ADD)
             Value v2 = frame->stack[--frame->stackpos];
             uint16_t id = program[frame->pc + 1];
             Value v1 = global_frame->vars[id];
-            
-            assert(v2.tag == VALUE_FLOAT
-                    && v1.tag == VALUE_FLOAT, "Math only works on numbers");
-            
-            Value v3;
-            if (op == INST_ASSIGN_GLOBAL_ADD) v3 = val_float(v1.u.f + v2.u.f);
-            if (op == INST_ASSIGN_GLOBAL_SUB) v3 = val_float(v1.u.f - v2.u.f);
-            if (op == INST_ASSIGN_GLOBAL_MUL) v3 = val_float(v1.u.f * v2.u.f);
-            if (op == INST_ASSIGN_GLOBAL_DIV) v3 = val_float(v1.u.f / v2.u.f);
-            
-            global_frame->vars[id] = v3;
-        } break;
-        case INST_ADD:
-        case INST_SUB:
-        case INST_MUL:
-        case INST_DIV:
-        {
+            assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
+            global_frame->vars[id] = val_float(v1.u.f + v2.u.f);
+        NEXT_CASE(INST_ASSIGN_GLOBAL_SUB)
+            Value v2 = frame->stack[--frame->stackpos];
+            uint16_t id = program[frame->pc + 1];
+            Value v1 = global_frame->vars[id];
+            assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
+            global_frame->vars[id] = val_float(v1.u.f - v2.u.f);
+        NEXT_CASE(INST_ASSIGN_GLOBAL_MUL)
+            Value v2 = frame->stack[--frame->stackpos];
+            uint16_t id = program[frame->pc + 1];
+            Value v1 = global_frame->vars[id];
+            assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
+            global_frame->vars[id] = val_float(v1.u.f * v2.u.f);
+        NEXT_CASE(INST_ASSIGN_GLOBAL_DIV)
+            Value v2 = frame->stack[--frame->stackpos];
+            uint16_t id = program[frame->pc + 1];
+            Value v1 = global_frame->vars[id];
+            assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
+            global_frame->vars[id] = val_float(v1.u.f / v2.u.f);
+        
+        NEXT_CASE(INST_ADD)
             Value v2 = frame->stack[--frame->stackpos];
             Value v1 = frame->stack[--frame->stackpos];
-            assert(v2.tag == VALUE_FLOAT
-                    && v1.tag == VALUE_FLOAT, "Math only works on numbers");
-            Value v3;
-            //printf("doing op %04X with %f and %f\n", INST_ADD, v1.u.f, v2.u.f);
-            if (op == INST_ADD) v3 = val_float(v1.u.f + v2.u.f);
-            if (op == INST_SUB) v3 = val_float(v1.u.f - v2.u.f);
-            if (op == INST_MUL) v3 = val_float(v1.u.f * v2.u.f);
-            if (op == INST_DIV) v3 = val_float(v1.u.f / v2.u.f);
-            frame->stack[frame->stackpos++] = v3;
-        } break;
-        case INST_FORSTART: {
+            assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
+            frame->stack[frame->stackpos++] = val_float(v1.u.f + v2.u.f);
+        NEXT_CASE(INST_SUB)
+            Value v2 = frame->stack[--frame->stackpos];
+            Value v1 = frame->stack[--frame->stackpos];
+            assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
+            frame->stack[frame->stackpos++] = val_float(v1.u.f - v2.u.f);
+        NEXT_CASE(INST_MUL)
+            Value v2 = frame->stack[--frame->stackpos];
+            Value v1 = frame->stack[--frame->stackpos];
+            assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
+            frame->stack[frame->stackpos++] = val_float(v1.u.f * v2.u.f);
+        NEXT_CASE(INST_DIV)
+            Value v2 = frame->stack[--frame->stackpos];
+            Value v1 = frame->stack[--frame->stackpos];
+            assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
+            frame->stack[frame->stackpos++] = val_float(v1.u.f / v2.u.f);
+        
+        NEXT_CASE(INST_FORSTART)
             Value v = frame->stack[--frame->stackpos];
             assert(v.tag == VALUE_FLOAT, "For loops can only operate on numbers");
             uint16_t id = program[frame->pc + 1];
             uint16_t idx = program[frame->pc + 2];
             frame->forloops[idx].limit = v.u.f;
             frame->vars[id] = val_float(0.0f);
-        } break;
-        case INST_FOREND: {
+        NEXT_CASE(INST_FOREND)
             uint16_t id = program[frame->pc + 1];
             uint16_t idx = program[frame->pc + 2];
             uint32_t target;
@@ -870,13 +954,31 @@ void interpret(void)
                 frame->pc = target;
                 continue;
             }
-        } break;
-        default: {
-            print_op_and_panic(op);
-        } break;
-        }
-        frame->pc += op >> 8;
-    }
+        NEXT_CASE(INST_JMP)
+            panic("TODO");
+        NEXT_CASE(PUSH_STRING)
+            panic("TODO");
+        NEXT_CASE(INST_IF)
+            panic("TODO");
+        NEXT_CASE(INST_EQ)
+            panic("TODO");
+        NEXT_CASE(PUSH_LOCAL)
+            panic("TODO");
+        NEXT_CASE(PUSH_FUNCNAME)
+            panic("TODO");
+        NEXT_CASE(INST_ASSIGN)
+            panic("TODO");
+        NEXT_CASE(INST_ASSIGN_ADD)
+            panic("TODO");
+        NEXT_CASE(INST_ASSIGN_SUB)
+            panic("TODO");
+        NEXT_CASE(INST_ASSIGN_MUL)
+            panic("TODO");
+        NEXT_CASE(INST_ASSIGN_DIV)
+            panic("TODO");
+        END_CASE()
+        DECAULT_CASE()
+    CASES_END()
 }
 
 int main(int argc, char ** argv)
