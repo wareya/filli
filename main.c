@@ -58,13 +58,13 @@ double badstrtod(const char * s)
     if (*s == '-') { sign = -1.0; s += 1; }
     if (!s[0]) return 0.0 * sign;
     
-    if ((s[0]&~32) == 'I' && (s[1]&~32) == 'N' && (s[0]&~32) == 'F') return sign/0.0;
+    if ((s[0]&~32) == 'I' && (s[1]&~32) == 'N' && (s[0]&~32) == 'F')
+        return sign/0.0;
     
     double ret = 0.0;
     while (*s != 0 && *s != '.' && *s >= '0' && *s <= '9')
         ret = ret * 10.0 + (*(s++) - '0');
-    if (*(s++) != '.')
-        return ret * sign;
+    if (*(s++) != '.') return ret * sign;
     
     double f2 = 0.1;
     while (*s != 0 && *s >= '0' && *s <= '9')
@@ -72,8 +72,6 @@ double badstrtod(const char * s)
     
     return ret * sign;
 }
-
-float badstrtof(const char * s) { return badstrtod(s); }
 
 const char * badftostr(double f)
 {
@@ -84,31 +82,23 @@ const char * badftostr(double f)
     char buf[50] = {};
     size_t i = 0;
     
-    uint32_t pun;
-    memcpy(&pun, &f, 4);
-    if (pun & 0x80000000) buf[i++] = '-';
+    uint64_t pun;
+    memcpy(&pun, &f, 8);
+    if (pun & 0x8000000000000000) buf[i++] = '-';
+    pun &= ~0x8000000000000000;
+    memcpy(&f, &pun, 8);
     
     size_t mag = 0;
-    while (f < 1000000000.0)
-    {
-        f *= 10.0;
-        mag += 1;
-    }
+    while (f < 1000000000.0) { f *= 10.0; mag++; }
     
-    uint64_t ipart = f;
-    uint8_t digits = 0;
-    uint64_t ipart2 = ipart;
-    while (ipart2) { digits++; ipart2 /= 10; }
+    uint64_t fi2 = f;
+    uint8_t digits = i;
+    while (fi2) { digits++; fi2 /= 10; }
     if (digits == 0) digits = 1;
-    ipart2 = ipart;
-    for (size_t j = digits; j > 0;)
-    {
-        buf[--j] = '0' + (ipart2 % 10);
-        ipart2 /= 10;
-    }
+    fi2 = f;
     
-    for (size_t j = digits; j > digits - mag; j--)
-        buf[j] = buf[j - 1];
+    for (size_t j = digits; j > i;) { buf[--j] = '0' + (fi2 % 10); fi2 /= 10; }
+    for (size_t j = digits; j > digits - mag; j--) buf[j] = buf[j - 1];
     buf[digits-mag] = '.';
     
     return stringdup(buf);
@@ -218,9 +208,7 @@ Token * tokenize(const char * source, size_t * count)
             size_t start_i = i;
             if (source[i] == '-') i += 1;
             while ((source[i] >= '0' && source[i] <= '9') || (dot_ok && source[i] == '.'))
-            {
-                if (source[i++] == '.') dot_ok = 0;
-            }
+                dot_ok &= !(source[i++] == '.');
             ret[t++] = mk_token(start_i, i-start_i, 0);
             continue;
         }
@@ -240,8 +228,7 @@ Token * tokenize(const char * source, size_t * count)
         // tokenize strings
         if (source[i] == '\'' || source[i] == '"')
         {
-            size_t start_i = i;
-            i += 1;
+            size_t start_i = i++;
             while (source[i] != source[start_i] && source[i] != 0)
             {
                 if (source[i] == '\\') i += 2;
@@ -536,9 +523,9 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         assert(ret > 0, "Assignment requires valid expression")
         i += ret;
         
-        uint8_t isglobal;
-        if (!in_global && locals_registered[id]) isglobal = 0;
-        else if (globals_registered[id]) isglobal = 1;
+        uint8_t is_global;
+        if (!in_global && locals_registered[id]) is_global = 0;
+        else if (globals_registered[id]) is_global = 1;
         else panic("Unknown variable");
         
         if (strncmp(opstr, "=", oplen) == 0)       program[prog_i++] = INST_ASSIGN;
@@ -547,8 +534,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         else if (strncmp(opstr, "*=", oplen) == 0) program[prog_i++] = INST_ASSIGN_MUL;
         else if (strncmp(opstr, "/=", oplen) == 0) program[prog_i++] = INST_ASSIGN_DIV;
         
-        if (isglobal)
-            program[prog_i - 1] += 1;
+        if (is_global) program[prog_i - 1] += 1;
         program[prog_i++] = id;
         return i - orig_i;
     }
@@ -581,9 +567,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         return i - orig_i;
     }
     else if (tokens[i].kind == -12) // end
-    {
         return i - orig_i;
-    }
     else if (token_is(source, tokens, count, i, "\n"))
         return 1;
     else
@@ -622,8 +606,7 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
         if (token_is(source, tokens, count, i, ")")) { i += 1; break; }
         if (tokens[i].kind >= -12) return 0;
         assert(j < 256);
-        args[j++] = -tokens[i].kind;
-        i += 1;
+        args[j++] = -tokens[i++].kind;
         if (!(token_is(source, tokens, count, i, ")")
               || token_is(source, tokens, count, i, ","))) return 0;
         if (token_is(source, tokens, count, i, ",")) i++;

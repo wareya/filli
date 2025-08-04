@@ -1,9 +1,9 @@
 
-let n = 10000000
+let n = 100000000
 let sum = 0
-let flip = -1
+let flip = 1
 for i in n:
-    flip *= -1
     sum += flip / (2 * i + 1)
+    flip *= -1
 end
 print(sum * 4)
