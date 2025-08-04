@@ -303,35 +303,6 @@ enum {
     PUSH_NUM, // f64
 };
 
-#define INSTRUCTIONS_XMACRO(X) \
-    INST_XXXX(INST_INVALID)\
-    INST_XXXX(INST_EQ)\
-    INST_XXXX(INST_ADD)\
-    INST_XXXX(INST_SUB)\
-    INST_XXXX(INST_MUL)\
-    INST_XXXX(INST_DIV)\
-    INST_XXXX(PUSH_LOCAL)\
-    INST_XXXX(PUSH_GLOBAL)\
-    INST_XXXX(PUSH_FUNCNAME)\
-    INST_XXXX(INST_ASSIGN)\
-    INST_XXXX(INST_ASSIGN_GLOBAL)\
-    INST_XXXX(INST_ASSIGN_ADD)\
-    INST_XXXX(INST_ASSIGN_GLOBAL_ADD)\
-    INST_XXXX(INST_ASSIGN_SUB)\
-    INST_XXXX(INST_ASSIGN_GLOBAL_SUB)\
-    INST_XXXX(INST_ASSIGN_MUL)\
-    INST_XXXX(INST_ASSIGN_GLOBAL_MUL)\
-    INST_XXXX(INST_ASSIGN_DIV)\
-    INST_XXXX(INST_ASSIGN_GLOBAL_DIV)\
-    INST_XXXX(INST_IF)\
-    INST_XXXX(INST_JMP)\
-    INST_XXXX(PUSH_NUM)\
-    INST_XXXX(PUSH_STRING)\
-    INST_XXXX(INST_FUNCDEF)\
-    INST_XXXX(INST_FORSTART)\
-    INST_XXXX(INST_FUNCCALL)\
-    INST_XXXX(INST_FOREND)
-
 // FIXME: make non-global
 uint16_t program[PROGRAM_MAXLEN];
 uint32_t prog_i = 0;
@@ -808,10 +779,6 @@ void interpret(void)
     
     Frame * global_frame = frame;
 
-#define USE_LOOP_DISPATCH
-
-#ifdef USE_LOOP_DISPATCH
-    
     #define CASES_START() \
     while (1) {\
         uint16_t opraw = program[frame->pc];\
@@ -824,39 +791,6 @@ void interpret(void)
     #define DECAULT_CASE() default: print_op_and_panic(op);
     
     #define NEXT_CASE(X) END_CASE() MARK_CASE(X)
-
-#else
-    
-    void ** handlers[0xFF];
-    for (size_t i = 0; i < 0xFF; i++)
-        handlers[i] = &&_handler_default;
-    
-    #define CASE_INSTALL(X) handlers[X & 0xFF] = &&_handler_##X;
-    
-    #define INST_XXXX CASE_INSTALL
-    INSTRUCTIONS_XMACRO()
-    
-    uint16_t opraw = 0;
-    uint16_t op = 0;
-    
-    #define CASES_HANDLE() \
-        if (frame->pc >= prog_i) return;\
-        opraw = program[frame->pc];\
-        op = opraw & 0xFF; \
-        goto *handlers[op];
-    
-    #define CASES_START() \
-    while (1) { CASES_HANDLE()
-    
-    #define CASES_END() }
-    
-    #define MARK_CASE(X) _handler_##X: {
-    #define END_CASE() frame->pc += opraw >> 8; CASES_HANDLE(); }
-    #define DECAULT_CASE() _handler_default: print_op_and_panic(opraw);
-    
-    #define NEXT_CASE(X) END_CASE() MARK_CASE(X)
-
-#endif
 
     memset(frame, 0, sizeof(Frame));
     
