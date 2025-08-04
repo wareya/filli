@@ -829,8 +829,8 @@ void interpret(void)
     #define INST_XXXX CASE_INSTALL
     INSTRUCTIONS_XMACRO()
     
-    uint16_t opraw;
-    uint16_t op;
+    uint16_t opraw = 0;
+    uint16_t op = 0;
     
     #define CASES_HANDLE() \
         if (frame->pc >= prog_i) return;\
