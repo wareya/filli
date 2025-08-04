@@ -3,6 +3,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define USE_GC
+
+#ifdef USE_GC
+#include <gc.h>
+#define malloc(X) GC_MALLOC(X)
+#define calloc(X, Y) GC_MALLOC(X*Y)
+#define realloc(X, Y) GC_REALLOC(X, Y)
+#define free(X) GC_FREE(X)
+#endif
+
 #define IDENTIFIER_COUNT 32000
 #define FRAME_VARCOUNT 1024
 #define FRAME_STACKSIZE 1024
@@ -28,10 +38,7 @@ char * stringdupn(const char * s, size_t len)
     memcpy(s2, s, len);
     return s2;
 }
-char * stringdup(const char * s)
-{
-    return stringdupn(s, strlen(s));
-}
+char * stringdup(const char * s) { return stringdupn(s, strlen(s)); }
 
 void prints(const char * s) { fputs(s, stdout); }
 void eprints(const char * s) { fputs(s, stderr); }
@@ -41,10 +48,7 @@ void printu16hex(uint16_t x)
     char s[5] = { c[(x>>12)&15], c[(x>>8)&15], c[(x>>4)&15], c[x&15], 0 };
     prints(s);
 }
-void printsn(const char * s, size_t len)
-{
-    prints(stringdupn(s, len));
-}
+void printsn(const char * s, size_t len) { prints(stringdupn(s, len)); }
 
 double badstrtod(const char * s)
 {
@@ -69,10 +73,7 @@ double badstrtod(const char * s)
     return ret * sign;
 }
 
-float badstrtof(const char * s)
-{
-    return badstrtod(s);
-}
+float badstrtof(const char * s) { return badstrtod(s); }
 
 const char * badftostr(double f)
 {
@@ -125,7 +126,6 @@ int16_t insert_or_lookup_id(const char * text, uint16_t len)
 {
     // FIXME make non-static
     static IdEntry ids[IDENTIFIER_COUNT] = {};
-    
     for (int16_t j = 1; j <= IDENTIFIER_COUNT; j++)
     {
         if (ids[j].len == 0)
@@ -278,19 +278,13 @@ enum {
     INST_EQ = 0x100,
     INST_ADD, INST_SUB, INST_MUL, INST_DIV,
     // 1-op
-    PUSH_LOCAL = 0x210,
-    PUSH_GLOBAL,
-    PUSH_FUNCNAME,
-    INST_ASSIGN,
-    INST_ASSIGN_GLOBAL,
-    INST_ASSIGN_ADD,
-    INST_ASSIGN_GLOBAL_ADD,
-    INST_ASSIGN_SUB,
-    INST_ASSIGN_GLOBAL_SUB,
-    INST_ASSIGN_MUL,
-    INST_ASSIGN_GLOBAL_MUL,
-    INST_ASSIGN_DIV,
-    INST_ASSIGN_GLOBAL_DIV,
+    PUSH_FUNCNAME = 0x210,
+    PUSH_LOCAL, PUSH_GLOBAL,
+    INST_ASSIGN, INST_ASSIGN_GLOBAL,
+    INST_ASSIGN_ADD, INST_ASSIGN_GLOBAL_ADD,
+    INST_ASSIGN_SUB, INST_ASSIGN_GLOBAL_SUB,
+    INST_ASSIGN_MUL, INST_ASSIGN_GLOBAL_MUL,
+    INST_ASSIGN_DIV, INST_ASSIGN_GLOBAL_DIV,
     // 2-op
     INST_IF = 0x320, // destination
     INST_JMP, // destination
@@ -354,6 +348,8 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
             program[prog_i++] = PUSH_GLOBAL;
         else if (funcs_registered[lex_ident_offset-tokens[i].kind].exists)
             program[prog_i++] = PUSH_FUNCNAME;
+        else
+            panic("Unknown identifier");
         program[prog_i++] = lex_ident_offset-tokens[i].kind;
     }
     else if (tokens[i].kind == 1)
@@ -478,10 +474,9 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
             if (r)
             {
                 i += r + 1;
+                program[prog_i++] = INST_ASSIGN;
                 if (in_global)
-                    program[prog_i++] = INST_ASSIGN_GLOBAL;
-                else
-                    program[prog_i++] = INST_ASSIGN;
+                    program[prog_i - 1] += 1;
                 program[prog_i++] = id;
             }
         }
@@ -497,10 +492,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
             locals_registered[id] = 1;
         assert(token_is(source, tokens, count, i++, "in"));
         uint16_t idx = for_loop_index++;
-        if (in_global)
-            assert(idx < FORLOOP_COUNT_LIMIT, "Too many for loops in global scope")
-        else
-            assert(idx < FORLOOP_COUNT_LIMIT, "Too many for loops in function")
+        assert(idx < FORLOOP_COUNT_LIMIT, "Too many for loops (max 256 per function or in root scope)")
         
         size_t ret = compile_expr(source, tokens, count, i, 0);
         assert(ret > 0, "For loop requires valid expression")
@@ -549,31 +541,14 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         else if (globals_registered[id]) isglobal = 1;
         else panic("Unknown variable");
         
-        if (strncmp(opstr, "=", oplen) == 0)
-        {
-            if (!isglobal) program[prog_i++] = INST_ASSIGN;
-            else           program[prog_i++] = INST_ASSIGN_GLOBAL;
-        }
-        else if (strncmp(opstr, "+=", oplen) == 0)
-        {
-            if (!isglobal) program[prog_i++] = INST_ASSIGN_ADD;
-            else           program[prog_i++] = INST_ASSIGN_GLOBAL_ADD;
-        }
-        else if (strncmp(opstr, "-=", oplen) == 0)
-        {
-            if (!isglobal) program[prog_i++] = INST_ASSIGN_SUB;
-            else           program[prog_i++] = INST_ASSIGN_GLOBAL_SUB;
-        }
-        else if (strncmp(opstr, "*=", oplen) == 0)
-        {
-            if (!isglobal) program[prog_i++] = INST_ASSIGN_MUL;
-            else           program[prog_i++] = INST_ASSIGN_GLOBAL_MUL;
-        }
-        else if (strncmp(opstr, "/=", oplen) == 0)
-        {
-            if (!isglobal) program[prog_i++] = INST_ASSIGN_DIV;
-            else           program[prog_i++] = INST_ASSIGN_GLOBAL_DIV;
-        }
+        if (strncmp(opstr, "=", oplen) == 0)       program[prog_i++] = INST_ASSIGN;
+        else if (strncmp(opstr, "+=", oplen) == 0) program[prog_i++] = INST_ASSIGN_ADD;
+        else if (strncmp(opstr, "-=", oplen) == 0) program[prog_i++] = INST_ASSIGN_SUB;
+        else if (strncmp(opstr, "*=", oplen) == 0) program[prog_i++] = INST_ASSIGN_MUL;
+        else if (strncmp(opstr, "/=", oplen) == 0) program[prog_i++] = INST_ASSIGN_DIV;
+        
+        if (isglobal)
+            program[prog_i - 1] += 1;
         program[prog_i++] = id;
         return i - orig_i;
     }
@@ -638,16 +613,13 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
     size_t orig_i = i;
     if (i >= count) return 0;
     if (tokens[i].kind >= -12) return 0;
-    int16_t id = lex_ident_offset - tokens[i].kind;
-    i += 1; // name
-    if (!token_is(source, tokens, count, i, "(")) return 0;
-    i += 1; // (
+    int16_t id = lex_ident_offset - tokens[i++].kind;
+    if (!token_is(source, tokens, count, i++, "(")) return 0;
     uint16_t args[256]; // at most 256 args per function
     uint32_t j = 0;
     while (1)
     {
-        if (token_is(source, tokens, count, i, ")")) break;
-        
+        if (token_is(source, tokens, count, i, ")")) { i += 1; break; }
         if (tokens[i].kind >= -12) return 0;
         assert(j < 256);
         args[j++] = -tokens[i].kind;
@@ -656,9 +628,7 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
               || token_is(source, tokens, count, i, ","))) return 0;
         if (token_is(source, tokens, count, i, ",")) i++;
     }
-    i += 1; // )
-    if (!token_is(source, tokens, count, i, ":")) return 0;
-    i += 1; // :
+    if (!token_is(source, tokens, count, i++, ":")) return 0;
     
     program[prog_i++] = INST_FUNCDEF;
     size_t len_offs = prog_i;
@@ -689,14 +659,11 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
         {
             in_global = 0;
             r = compile_func(source, tokens, count, i+1);
-            if (r == 0)
-                panic("Incomplete function");
+            in_global = 1;
+            if (r == 0) panic("Incomplete function");
             i += r + 1;
             
-            if (tokens[i].kind != -12) // end
-                panic("Missing end keyword");
-            i += 1;
-            in_global = 1;
+            if (tokens[i++].kind != -12) panic("Missing end keyword");
         }
         else if ((r = compile_statement(source, tokens, count, i)))
         {
@@ -728,6 +695,7 @@ typedef struct _Value {
 enum {
     VALUE_FLOAT,
     VALUE_ARRAY,
+    VALUE_STRING,
 };
 
 Value val_float(double f)
@@ -738,17 +706,13 @@ Value val_float(double f)
     return v;
 }
 
-typedef struct _Forloop {
-    double limit;
-} Forloop;
-
 typedef struct _Frame {
     size_t pc;
     struct _Frame * return_to;
     size_t stackpos;
     Value vars[FRAME_VARCOUNT];
     Value stack[FRAME_STACKSIZE];
-    Forloop forloops[FORLOOP_COUNT_LIMIT];
+    double forloops[FORLOOP_COUNT_LIMIT];
 } Frame;
 
 void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
@@ -824,50 +788,33 @@ void interpret(void)
             uint16_t id = program[frame->pc + 1];
             global_frame->vars[id] = v;
         
-        NEXT_CASE(INST_ASSIGN_GLOBAL_ADD)
-            Value v2 = frame->stack[--frame->stackpos];
-            uint16_t id = program[frame->pc + 1];
-            Value v1 = global_frame->vars[id];
+        #define GLOBAL_MATH_SHARED()\
+            Value v2 = frame->stack[--frame->stackpos];\
+            uint16_t id = program[frame->pc + 1];\
+            Value v1 = global_frame->vars[id];\
             assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
+            
+        NEXT_CASE(INST_ASSIGN_GLOBAL_ADD) GLOBAL_MATH_SHARED()
             global_frame->vars[id] = val_float(v1.u.f + v2.u.f);
-        NEXT_CASE(INST_ASSIGN_GLOBAL_SUB)
-            Value v2 = frame->stack[--frame->stackpos];
-            uint16_t id = program[frame->pc + 1];
-            Value v1 = global_frame->vars[id];
-            assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
+        NEXT_CASE(INST_ASSIGN_GLOBAL_SUB) GLOBAL_MATH_SHARED()
             global_frame->vars[id] = val_float(v1.u.f - v2.u.f);
-        NEXT_CASE(INST_ASSIGN_GLOBAL_MUL)
-            Value v2 = frame->stack[--frame->stackpos];
-            uint16_t id = program[frame->pc + 1];
-            Value v1 = global_frame->vars[id];
-            assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
+        NEXT_CASE(INST_ASSIGN_GLOBAL_MUL) GLOBAL_MATH_SHARED()
             global_frame->vars[id] = val_float(v1.u.f * v2.u.f);
-        NEXT_CASE(INST_ASSIGN_GLOBAL_DIV)
-            Value v2 = frame->stack[--frame->stackpos];
-            uint16_t id = program[frame->pc + 1];
-            Value v1 = global_frame->vars[id];
-            assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
+        NEXT_CASE(INST_ASSIGN_GLOBAL_DIV) GLOBAL_MATH_SHARED()
             global_frame->vars[id] = val_float(v1.u.f / v2.u.f);
         
-        NEXT_CASE(INST_ADD)
-            Value v2 = frame->stack[--frame->stackpos];
-            Value v1 = frame->stack[--frame->stackpos];
+        #define MATH_SHARED()\
+            Value v2 = frame->stack[--frame->stackpos];\
+            Value v1 = frame->stack[--frame->stackpos];\
             assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
+        
+        NEXT_CASE(INST_ADD) MATH_SHARED()
             frame->stack[frame->stackpos++] = val_float(v1.u.f + v2.u.f);
-        NEXT_CASE(INST_SUB)
-            Value v2 = frame->stack[--frame->stackpos];
-            Value v1 = frame->stack[--frame->stackpos];
-            assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
+        NEXT_CASE(INST_SUB) MATH_SHARED()
             frame->stack[frame->stackpos++] = val_float(v1.u.f - v2.u.f);
-        NEXT_CASE(INST_MUL)
-            Value v2 = frame->stack[--frame->stackpos];
-            Value v1 = frame->stack[--frame->stackpos];
-            assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
+        NEXT_CASE(INST_MUL) MATH_SHARED()
             frame->stack[frame->stackpos++] = val_float(v1.u.f * v2.u.f);
-        NEXT_CASE(INST_DIV)
-            Value v2 = frame->stack[--frame->stackpos];
-            Value v1 = frame->stack[--frame->stackpos];
-            assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
+        NEXT_CASE(INST_DIV) MATH_SHARED()
             frame->stack[frame->stackpos++] = val_float(v1.u.f / v2.u.f);
         
         NEXT_CASE(INST_FORSTART)
@@ -875,7 +822,9 @@ void interpret(void)
             assert(v.tag == VALUE_FLOAT, "For loops can only operate on numbers");
             uint16_t id = program[frame->pc + 1];
             uint16_t idx = program[frame->pc + 2];
-            frame->forloops[idx].limit = v.u.f;
+            frame->forloops[idx] = v.u.f;
+            double temp = v.u.f;
+            assert(temp - 1.0 != temp, "For loop value is too large and will never terminate");
             frame->vars[id] = val_float(0.0f);
         NEXT_CASE(INST_FOREND)
             uint16_t id = program[frame->pc + 1];
@@ -883,7 +832,7 @@ void interpret(void)
             uint32_t target;
             memcpy(&target, program + (frame->pc + 3), 4);
             
-            double limit = frame->forloops[idx].limit;
+            double limit = frame->forloops[idx];
             
             Value v = frame->vars[id];
             assert(v.tag == VALUE_FLOAT, "For loops can only operate on numbers");
@@ -924,6 +873,9 @@ void interpret(void)
 
 int main(int argc, char ** argv)
 {
+#ifdef USE_GC
+    GC_INIT();
+#endif
     if (argc < 2) { prints("Usage: filli filename.fil\n"); return 0; }
     char * source = 0;
     size_t total_size = 0;
