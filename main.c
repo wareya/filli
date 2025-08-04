@@ -154,10 +154,8 @@ Token mk_token(uint32_t i, uint16_t len, int16_t kind)
 
 int lex_ident_offset = 0;
 
-Token * tokenize(const char * source, size_t * count)
+void lex_init(void)
 {
-    int newline_is_token = 1;
-    
     // give keywords known ids
     insert_or_lookup_id("if", 2);        // 1
     insert_or_lookup_id("else", 4);      // 2
@@ -172,6 +170,11 @@ Token * tokenize(const char * source, size_t * count)
     insert_or_lookup_id("begin", 3);     // 11
     insert_or_lookup_id("end", 3);       // 12
     lex_ident_offset = highest_ident_id;
+}
+
+Token * tokenize(const char * source, size_t * count)
+{
+    int newline_is_token = 1;
     
     const char * long_punctuation[] = {
         "==", "!=", ">=", "<=", "->",
@@ -264,6 +267,7 @@ enum {
     // zero-op
     INST_EQ = 0x100,
     INST_ADD, INST_SUB, INST_MUL, INST_DIV,
+    INST_INDEX,
     // 1-op
     PUSH_FUNCNAME = 0x210,
     PUSH_STRING, // table index
@@ -273,6 +277,8 @@ enum {
     INST_ASSIGN_SUB, INST_ASSIGN_GLOBAL_SUB,
     INST_ASSIGN_MUL, INST_ASSIGN_GLOBAL_MUL,
     INST_ASSIGN_DIV, INST_ASSIGN_GLOBAL_DIV,
+    INST_FUNCCALL_EXPR, // arg count
+    INST_ARRAY_LITERAL, // item count
     // 2-op
     INST_IF = 0x320, // destination
     INST_JMP, // destination
@@ -304,6 +310,8 @@ int tokenop_bindlevel(const char * source, Token * tokens, size_t count, size_t 
     if (token_is(source, tokens, count, i, "-")) return 4;
     if (token_is(source, tokens, count, i, "*")) return 5;
     if (token_is(source, tokens, count, i, "/")) return 5;
+    if (token_is(source, tokens, count, i, "[")) return 500;
+    if (token_is(source, tokens, count, i, "(")) return 500;
     return -1;
 }
 
@@ -392,6 +400,31 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
         if (!token_is(source, tokens, count, i + ret, ")")) panic("Unclosed parens");
         return ret + 1;
     }
+    if (token_is(source, tokens, count, i, "[")) // array literal
+    {
+        size_t orig_i = i;
+        i += 1; // [
+        
+        uint16_t j = 0;
+        while (1)
+        {
+            if (token_is(source, tokens, count, i, "]")) break;
+            
+            size_t r = compile_expr(source, tokens, count, i, 0);
+            if (r == 0) return 0;
+            assert(j++ < 32000, "Too many values in array literal (limit is 32000)");
+            i += r;
+            
+            if (!(token_is(source, tokens, count, i, "]")
+                || token_is(source, tokens, count, i, ","))) return 0;
+            if (token_is(source, tokens, count, i, ",")) i++;
+        }
+        if (!token_is(source, tokens, count, i++, "]")) return 0;
+        
+        program[prog_i++] = INST_ARRAY_LITERAL;
+        program[prog_i++] = j;
+        return i - orig_i;
+    }
     return compile_value(source, tokens, count, i++);
 }
 
@@ -419,7 +452,35 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
     
     int binding_power = tokenop_bindlevel(source, tokens, count, i);
     if (binding_power < 0) return 0;
-    int r = compile_expr(source, tokens, count, i + 1, binding_power);
+    
+    // func calls
+    if (token_is(source, tokens, count, i, "("))
+    {
+        size_t orig_i = i;
+        i += 1; // (
+        
+        uint16_t j = 0;
+        while (1)
+        {
+            if (token_is(source, tokens, count, i, ")")) break;
+            
+            size_t r = compile_expr(source, tokens, count, i, 0);
+            if (r == 0) return 0;
+            assert(j++ < 256, "Too many arguments to function (limit is 256)");
+            i += r;
+            
+            if (!(token_is(source, tokens, count, i, ")")
+                || token_is(source, tokens, count, i, ","))) return 0;
+            if (token_is(source, tokens, count, i, ",")) i++;
+        }
+        if (!token_is(source, tokens, count, i++, ")")) return 0;
+        
+        program[prog_i++] = INST_FUNCCALL_EXPR;
+        program[prog_i++] = j;
+        return i - orig_i;
+    }
+    
+    int r = compile_expr(source, tokens, count, i + 1, binding_power < 500 ? binding_power : 0);
     if (r == 0) return 0;
     
     uint16_t inst;
@@ -428,6 +489,13 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
     else if (token_is(source, tokens, count, i, "+")) inst = INST_ADD;
     else if (token_is(source, tokens, count, i, "*")) inst = INST_MUL;
     else if (token_is(source, tokens, count, i, "==")) inst = INST_EQ;
+    else if (token_is(source, tokens, count, i, "["))
+    {
+        inst = INST_INDEX;
+        i += r + 1;
+        assert(token_is(source, tokens, count, i++, "]"));
+        r += 1;
+    }
     else panic("TODO");
     program[prog_i++] = inst;
     return r + 1;
@@ -682,8 +750,9 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
 
 struct _Value;
 typedef struct _Array {
-    struct _Value * first;
+    struct _Value * buf;
     size_t len;
+    size_t cap;
 } Array;
 
 typedef struct _Value {
@@ -696,6 +765,12 @@ enum {
     VALUE_ARRAY,
     VALUE_STRING,
 };
+
+Value array_get(Array * a, size_t i)
+{
+    assert(i < a->len);
+    return a->buf[i];
+}
 
 Value val_float(double f)
 {
@@ -727,15 +802,15 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
     if (id == lex_ident_offset - insert_or_lookup_id("print", 5))
     {
         for (size_t i = 0; i < argcount; i++)
-            prints(badftostr(frame->stack[frame->stackpos - 1 - i].u.f));
-        prints("\n");
-    }
-    else if (id == lex_ident_offset - insert_or_lookup_id("prints", 6))
-    {
-        for (size_t i = 0; i < argcount; i++)
         {
-            prints(frame->stack[frame->stackpos - 1 - i].u.s);
-            prints(" ");
+            int tag = frame->stack[frame->stackpos - 1 - i].tag;
+            if (tag == VALUE_FLOAT)
+                prints(badftostr(frame->stack[frame->stackpos - 1 - i].u.f));
+            else if (tag == VALUE_STRING)
+                prints(frame->stack[frame->stackpos - 1 - i].u.s);
+            else if (tag == VALUE_ARRAY)
+                prints("<array>");
+            if (i + 1 < argcount) prints(" ");
         }
         prints("\n");
     }
@@ -779,6 +854,17 @@ void interpret(void)
             return;
         NEXT_CASE(INST_FUNCDEF)
             panic("TODO funcdef");
+        NEXT_CASE(INST_ARRAY_LITERAL)
+            uint16_t itemcount = program[frame->pc + 1];
+            Value v;
+            v.tag = VALUE_ARRAY;
+            v.u.a = (Array *)malloc(sizeof(Array));
+            v.u.a->buf = (Value *)malloc(sizeof(Value) * itemcount);
+            v.u.a->len = itemcount;
+            v.u.a->cap = itemcount;
+            while (itemcount > 0)
+                v.u.a->buf[--itemcount] = frame->stack[--frame->stackpos];
+            frame->stack[frame->stackpos++] = v;
         NEXT_CASE(INST_FUNCCALL)
             uint16_t id = program[frame->pc + 1];
             uint16_t argcount = program[frame->pc + 2];
@@ -883,6 +969,20 @@ void interpret(void)
             panic("TODO");
         NEXT_CASE(INST_ASSIGN_DIV)
             panic("TODO");
+        NEXT_CASE(INST_INDEX)
+            Value v2 = frame->stack[--frame->stackpos];
+            Value v1 = frame->stack[--frame->stackpos];
+            assert(v1.tag != VALUE_FLOAT);
+            if (v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY)
+                assert(v2.tag == VALUE_FLOAT);
+            if (v1.tag == VALUE_STRING)
+            {
+                assert(((size_t)v2.u.f) < strlen(v1.u.s));
+                v1.u.s = stringdupn(v1.u.s + (size_t)v2.u.f, 1);
+            }
+            if (v1.tag == VALUE_ARRAY)
+                v1 = array_get(v1.u.a, v2.u.f);
+            frame->stack[frame->stackpos++] = v1;
         END_CASE()
         DECAULT_CASE()
     CASES_END()
@@ -899,15 +999,25 @@ int main(int argc, char ** argv)
 #ifdef USE_GC
     GC_INIT();
 #endif
+    
+    lex_init();
+    register_intrinsic_func("print");
+    
     if (argc < 2) { prints("Usage: filli filename.fil\n"); return 0; }
     char * source = 0;
     size_t total_size = 0;
+    
     #define CHUNK_SIZE 4096
     size_t capacity = CHUNK_SIZE;
     source = (char*)malloc(capacity);
     if (!source) { perror("Out of memory"); return 1; }
     
-    FILE * file = fopen(argv[1], "rb");
+    FILE * file;
+    if (strcmp(argv[1], "-") == 0)
+        file = stdin;
+    else
+        file = fopen(argv[1], "rb");
+    
     if (!file) { perror("Error reading file"); return 1; }
     
     size_t bytes_read = 0;
@@ -929,16 +1039,6 @@ int main(int argc, char ** argv)
     
     size_t count = 0;
     Token * tokens = tokenize(source, &count);
-    
-    for (size_t i = 0; i < count; i++)
-    {
-        prints("[");
-        printsn(source + tokens[i].i, tokens[i].len);
-        prints("]\n");
-    }
-    
-    register_intrinsic_func("print");
-    register_intrinsic_func("prints");
     
     compile(source, tokens, count, 0);
     
