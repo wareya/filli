@@ -266,6 +266,7 @@ enum {
     INST_ADD, INST_SUB, INST_MUL, INST_DIV,
     // 1-op
     PUSH_FUNCNAME = 0x210,
+    PUSH_STRING, // table index
     PUSH_LOCAL, PUSH_GLOBAL,
     INST_ASSIGN, INST_ASSIGN_GLOBAL,
     INST_ASSIGN_ADD, INST_ASSIGN_GLOBAL_ADD,
@@ -275,7 +276,6 @@ enum {
     // 2-op
     INST_IF = 0x320, // destination
     INST_JMP, // destination
-    PUSH_STRING, // token index
     INST_FUNCDEF, // skip destination
     INST_FORSTART, // var id (2), for slot (2)
     INST_FUNCCALL, // func id, arg count
@@ -314,6 +314,9 @@ typedef struct _Funcdef {
     uint16_t * args;
 } Funcdef;
 
+const char * compiled_strings[1<<16] = {};
+uint16_t compiled_string_i = 0;
+
 uint8_t in_global = 1;
 Funcdef funcs_registered[IDENTIFIER_COUNT] = {};
 uint8_t locals_registered[IDENTIFIER_COUNT] = {};
@@ -342,9 +345,22 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
     else if (tokens[i].kind == 1)
     {
         program[prog_i++] = PUSH_STRING;
-        program[prog_i++] = 0;
-        program[prog_i++] = 0;
-        memcpy(program + prog_i - 2, &i, 4);
+        size_t l = tokens[i].len - 2;
+        const char * sold = source + tokens[i].i + 1;
+        char * s = stringdupn(sold, l);
+        size_t j = 0;
+        for (size_t i = 0; i < l; i++)
+        {
+            if      (sold[i] == '\\' && sold[i+1] ==  '"' && ++i) s[j++] = '"';
+            else if (sold[i] == '\\' && sold[i+1] == '\\' && ++i) s[j++] = '\\';
+            else if (sold[i] == '\\' && sold[i+1] ==  'r' && ++i) s[j++] = '\r';
+            else if (sold[i] == '\\' && sold[i+1] ==  'n' && ++i) s[j++] = '\n';
+            else if (sold[i] == '\\' && sold[i+1] ==  't' && ++i) s[j++] = '\t';
+            else s[j++] = sold[i];
+        }
+        s[j] = 0;
+        compiled_strings[compiled_string_i] = s;
+        program[prog_i++] = compiled_string_i++;
     }
     else if (tokens[i].kind == 0)
     {
@@ -671,7 +687,7 @@ typedef struct _Array {
 } Array;
 
 typedef struct _Value {
-    union { double f; Array * a; } u;
+    union { double f; Array * a; char * s; } u;
     uint8_t tag;
 } Value;
 
@@ -689,6 +705,14 @@ Value val_float(double f)
     return v;
 }
 
+Value val_string(char * s)
+{
+    Value v;
+    v.tag = VALUE_STRING;
+    v.u.s = s;
+    return v;
+}
+
 typedef struct _Frame {
     size_t pc;
     struct _Frame * return_to;
@@ -703,8 +727,16 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
     if (id == lex_ident_offset - insert_or_lookup_id("print", 5))
     {
         for (size_t i = 0; i < argcount; i++)
-            //printf("%f ", frame->stack[frame->stackpos - 1 - i].u.f);
             prints(badftostr(frame->stack[frame->stackpos - 1 - i].u.f));
+        prints("\n");
+    }
+    else if (id == lex_ident_offset - insert_or_lookup_id("prints", 6))
+    {
+        for (size_t i = 0; i < argcount; i++)
+        {
+            prints(frame->stack[frame->stackpos - 1 - i].u.s);
+            prints(" ");
+        }
         prints("\n");
     }
     else
@@ -830,7 +862,9 @@ void interpret(void)
         NEXT_CASE(INST_JMP)
             panic("TODO");
         NEXT_CASE(PUSH_STRING)
-            panic("TODO");
+            uint16_t id = program[frame->pc + 1];
+            char * s = stringdup(compiled_strings[id]);
+            frame->stack[frame->stackpos++] = val_string(s);
         NEXT_CASE(INST_IF)
             panic("TODO");
         NEXT_CASE(INST_EQ)
@@ -854,6 +888,12 @@ void interpret(void)
     CASES_END()
 }
 
+void register_intrinsic_func(const char * s)
+{
+    int16_t id = lex_ident_offset - insert_or_lookup_id(s, strlen(s));
+    funcs_registered[id].exists = 1;
+    funcs_registered[id].intrinsic = 1;
+}
 int main(int argc, char ** argv)
 {
 #ifdef USE_GC
@@ -897,10 +937,8 @@ int main(int argc, char ** argv)
         prints("]\n");
     }
     
-    //register_intrinsic_func
-    int16_t id = lex_ident_offset - insert_or_lookup_id("print", 5);
-    funcs_registered[id].exists = 1;
-    funcs_registered[id].intrinsic = 1;
+    register_intrinsic_func("print");
+    register_intrinsic_func("prints");
     
     compile(source, tokens, count, 0);
     
