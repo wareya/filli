@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+// TODO: "continue" and "break"
+
 #define USE_GC
 
 #ifdef USE_GC
@@ -345,11 +347,11 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
         size_t j = 0;
         for (size_t i = 0; i < l; i++)
         {
-            if      (sold[i] == '\\' && sold[i+1] ==  '"' && ++i) s[j++] = '"';
-            else if (sold[i] == '\\' && sold[i+1] == '\\' && ++i) s[j++] = '\\';
-            else if (sold[i] == '\\' && sold[i+1] ==  'r' && ++i) s[j++] = '\r';
-            else if (sold[i] == '\\' && sold[i+1] ==  'n' && ++i) s[j++] = '\n';
-            else if (sold[i] == '\\' && sold[i+1] ==  't' && ++i) s[j++] = '\t';
+            if      (sold[i] == '\\' && sold[i+1] ==  '"' && ++i)   s[j++] = '"';
+            else if (sold[i] == '\\' && sold[i+1] == '\\' && ++i)   s[j++] = '\\';
+            else if (sold[i] == '\\' && sold[i+1] ==  'r' && ++i)   s[j++] = '\r';
+            else if (sold[i] == '\\' && sold[i+1] ==  'n' && ++i)   s[j++] = '\n';
+            else if (sold[i] == '\\' && sold[i+1] ==  't' && ++i)   s[j++] = '\t';
             else s[j++] = sold[i];
         }
         s[j] = 0;
@@ -392,7 +394,8 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
         {
             size_t r = compile_expr(source, tokens, count, i, 0);
             if (r == 0) return 0;
-            assert(j++ < 32000, "Too many values in array literal (limit is 32000)");
+            assert(j < 32000, "Too many values in array literal (limit is 32000)");
+            j += 1;
             i += r;
             
             if (!(token_is(source, tokens, count, i, "]") || token_is(source, tokens, count, i, ","))) return 0;
@@ -573,8 +576,10 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
     {
         if (++i >= count) return 0;
         int16_t id = lex_ident_offset - tokens[i++].kind;
+        
         if (in_global) globals_registered[id] = 1;
         else           locals_registered[id] = 1;
+        
         if (token_is(source, tokens, count, i, "="))
         {
             size_t r = compile_expr(source, tokens, count, i + 1, 0);
@@ -610,21 +615,17 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         assert(tokens[i++].kind == -12, "Missing end keyword");
         
         inst_push3(INST_FOREND, id, idx);
-        size_t at = prog_i;
         prog_i += 2;
-        memcpy(program + at, &head, 4);
+        memcpy(program + (prog_i - 2), &head, 4);
         
         uint32_t end = prog_i;
         memcpy(program + (head - 2), &end, 4);
         return i - orig_i;
     }
     else if (i + 2 < count && tokens[i].kind < -lex_ident_offset
-             && (token_is(source, tokens, count, i+1, "=")
-                 || token_is(source, tokens, count, i+1, "+=")
-                 || token_is(source, tokens, count, i+1, "-=")
-                 || token_is(source, tokens, count, i+1, "*=")
-                 || token_is(source, tokens, count, i+1, "/=")
-            ))
+        && (token_is(source, tokens, count, i+1, "=")
+            || token_is(source, tokens, count, i+1, "+=") || token_is(source, tokens, count, i+1, "-=")
+            || token_is(source, tokens, count, i+1, "*=") || token_is(source, tokens, count, i+1, "/=")))
     {
         const char * opstr = stringdupn(source + tokens[i+1].i, tokens[i+1].len);
         size_t oplen = tokens[i+1].len;
@@ -701,10 +702,8 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         i += r;
         
         if ((token_is(source, tokens, count, i, "=")
-             || token_is(source, tokens, count, i, "+=")
-             || token_is(source, tokens, count, i, "-=")
-             || token_is(source, tokens, count, i, "*=")
-             || token_is(source, tokens, count, i, "/="))
+             || token_is(source, tokens, count, i, "+=") || token_is(source, tokens, count, i, "-=")
+             || token_is(source, tokens, count, i, "*=") || token_is(source, tokens, count, i, "/="))
             && program[prog_i - 1] == INST_INDEX)
         {
             size_t old_i = i;
@@ -812,6 +811,7 @@ struct _Value;
 typedef struct _Array { struct _Value * buf; size_t len; size_t cap; } Array;
 
 enum { VALUE_FLOAT, VALUE_ARRAY, VALUE_STRING, VALUE_FUNC, VALUE_NULL }; // tag
+
 typedef struct _Value {
     union { double f; Array * a; char * s; Funcdef * fn; } u;
     uint8_t tag;
@@ -825,10 +825,10 @@ Value val_func(uint16_t id) { Value v; v.tag = VALUE_FUNC; v.u.fn = &funcs_regis
 
 uint8_t val_truthy(Value v)
 {
-    if (v.tag == VALUE_FLOAT) return v.u.f != 0.0;
-    if (v.tag == VALUE_STRING) return v.u.s[0] != 0;
-    if (v.tag == VALUE_ARRAY) return v.u.a->len > 0;
-    if (v.tag == VALUE_FUNC) return 1;
+    if (v.tag == VALUE_FLOAT)   return v.u.f != 0.0;
+    if (v.tag == VALUE_STRING)  return v.u.s[0] != 0;
+    if (v.tag == VALUE_ARRAY)   return v.u.a->len > 0;
+    if (v.tag == VALUE_FUNC)    return 1;
     return 0;
 }
 
@@ -843,27 +843,6 @@ typedef struct _Frame {
     double forloops[FORLOOP_COUNT_LIMIT];
 } Frame;
 
-void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
-{
-    if (id == lex_ident_offset - insert_or_lookup_id("print", 5))
-    {
-        for (size_t i = 0; i < argcount; i++)
-        {
-            int tag = frame->stack[frame->stackpos - 1 - i].tag;
-            if (tag == VALUE_FLOAT)
-                prints(baddtostr(frame->stack[frame->stackpos - 1 - i].u.f));
-            else if (tag == VALUE_STRING)
-                prints(frame->stack[frame->stackpos - 1 - i].u.s);
-            else if (tag == VALUE_ARRAY)
-                prints("<array>");
-            if (i + 1 < argcount) prints(" ");
-        }
-        prints("\n");
-    }
-    else
-        panic("Unknown internal function");
-}
-
 void print_op_and_panic(uint16_t op)
 {
     prints("---\n");
@@ -871,6 +850,8 @@ void print_op_and_panic(uint16_t op)
     prints("\n---\n");
     panic("TODO");
 }
+
+void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame);
 
 void interpret(void)
 {
@@ -881,8 +862,7 @@ void interpret(void)
 
     #define CASES_START() \
     while (1) {\
-        uint16_t opraw = program[frame->pc];\
-        uint16_t op = opraw;\
+        uint16_t op = program[frame->pc];\
         switch (op) {
     #define CASES_END() } }
     
@@ -898,13 +878,13 @@ void interpret(void)
     
     CASES_START()
         
-        MARK_CASE(INST_INVALID)    return;
-        NEXT_CASE(INST_DISCARD)    --frame->stackpos;
-        NEXT_CASE(INST_FUNCDEF)
-            uint32_t target;
-            memcpy(&target, program + (frame->pc + 1), 4);
-            frame->pc = target;
-            continue;
+        #define READ_AND_GOTO_TARGET(X)\
+            { uint32_t target; memcpy(&target, program + (frame->pc + X), 4); frame->pc = target; continue; }
+        
+        MARK_CASE(INST_INVALID)     return;
+        NEXT_CASE(INST_DISCARD)     --frame->stackpos;
+        NEXT_CASE(INST_FUNCDEF)     READ_AND_GOTO_TARGET(1)
+        
         NEXT_CASE(INST_ARRAY_LITERAL)
             uint16_t itemcount = program[frame->pc + 1];
             Value v;
@@ -944,6 +924,7 @@ void interpret(void)
             uint16_t argcount = program[frame->pc + 2];
             Funcdef * fn = &funcs_registered[id];
             ENTER_FUNC()
+        
         NEXT_CASE(INST_FUNCCALL_EXPR)
             uint16_t argcount = program[frame->pc + 1];
             Value v_func = frame->stack[frame->stackpos - argcount - 1];
@@ -1032,12 +1013,6 @@ void interpret(void)
         NEXT_CASE(INST_CMP_GT)    EQ_SHARED()
             frame->stack[frame->stackpos++] = val_float(equality == -1);
         
-        #define READ_AND_GOTO_TARGET(X)\
-            { uint32_t target;\
-            memcpy(&target, program + (frame->pc + X), 4);\
-            frame->pc = target;\
-            continue; }
-            
         NEXT_CASE(INST_FORSTART)
             Value v = frame->stack[--frame->stackpos];
             assert(v.tag == VALUE_FLOAT, "For loops can only operate on numbers");
@@ -1094,21 +1069,17 @@ void interpret(void)
             frame->vars[id] = val_float(v1.u.f * v2.u.f);
         NEXT_CASE(INST_ASSIGN_DIV)    LOCAL_MATH_SHARED()
             frame->vars[id] = val_float(v1.u.f / v2.u.f);
-        
             
         NEXT_CASE(INST_ASSIGN_ADDR)
             Value v2 = frame->stack[--frame->stackpos];
             if (frame->assign_target_agg)
-            {
                 *frame->assign_target_agg = v2;
-                frame->assign_target_agg = 0;
-            }
             else
-            {
-                assert(frame->assign_target_char && v2.tag == VALUE_STRING);
+                assert(frame->assign_target_char && v2.tag == VALUE_STRING && *v2.u.s != '\0');
+            if (frame->assign_target_char)
                 *frame->assign_target_char = *v2.u.s;
-                frame->assign_target_char = 0;
-            }
+            frame->assign_target_agg = 0;
+            frame->assign_target_char = 0;
         
         #define ADDR_MATH_SHARED()\
             Value v2 = frame->stack[--frame->stackpos];\
@@ -1135,17 +1106,13 @@ void interpret(void)
                 assert(((size_t)v2.u.f) STR_VALID_OP strlen(v1.u.s));
     
         NEXT_CASE(INST_INDEX)    INDEX_SHARED(<=)
-            if (v1.tag == VALUE_STRING)
-                v1.u.s = stringdupn(v1.u.s + (size_t)v2.u.f, 1);
-            if (v1.tag == VALUE_ARRAY)
-                v1 = *array_get(v1.u.a, v2.u.f);
+            if (v1.tag == VALUE_STRING) v1.u.s = stringdupn(v1.u.s + (size_t)v2.u.f, 1);
+            if (v1.tag == VALUE_ARRAY)  v1 = *array_get(v1.u.a, v2.u.f);
             frame->stack[frame->stackpos++] = v1;
         
         NEXT_CASE(INST_INDEX_ADDR)    INDEX_SHARED(<)
-            if (v1.tag == VALUE_STRING)
-                frame->assign_target_char = v1.u.s + (size_t)v2.u.f;
-            if (v1.tag == VALUE_ARRAY)
-                frame->assign_target_agg = array_get(v1.u.a, v2.u.f);
+            if (v1.tag == VALUE_STRING) frame->assign_target_char = v1.u.s + (size_t)v2.u.f;
+            if (v1.tag == VALUE_ARRAY)  frame->assign_target_agg = array_get(v1.u.a, v2.u.f);
         
         END_CASE()
         DECAULT_CASE()
@@ -1159,21 +1126,22 @@ void register_intrinsic_func(const char * s)
     funcs_registered[id].intrinsic = 1;
     funcs_registered[id].id = id;
 }
+
+#include "intrinsics.h"
+
 int main(int argc, char ** argv)
 {
 #ifdef USE_GC
     GC_INIT();
 #endif
     lex_init();
-    register_intrinsic_func("print");
+    register_intrinsic_funcs();
     
     if (argc < 2) { prints("Usage: filli filename.fil\n"); return 0; }
     char * source = 0;
     size_t total_size = 0;
     
-    #define CHUNK_SIZE 4096
-    size_t capacity = CHUNK_SIZE;
-    source = (char*)malloc(capacity);
+    source = (char*)malloc(4096);
     if (!source) { perror("Out of memory"); return 1; }
     
     FILE * file;
@@ -1183,17 +1151,14 @@ int main(int argc, char ** argv)
     if (!file) { perror("Error reading file"); return 1; }
     
     size_t bytes_read = 0;
-    while ((bytes_read = fread(source + total_size, 1, capacity - total_size - 1, file)) > 0)
+    while ((bytes_read = fread(source + total_size, 1, 4096, file)) == 4096)
     {
         total_size += bytes_read;
-        if (total_size >= capacity - 1)
-        {
-            capacity += CHUNK_SIZE;
-            char * new_buffer = (char*)realloc(source, capacity);
-            if (!new_buffer) { perror("Out of memory"); return 1; }
-            source = new_buffer;
-        }
+        source = (char*)realloc(source, total_size + 4096);
+        if (!source) { perror("Out of memory"); return 1; }
     }
+    total_size += bytes_read;
+    
     if (ferror(file)) { perror("Error reading file"); return 1; }
     fclose(file);
     source[total_size] = 0;
