@@ -1,9 +1,10 @@
 #ifndef FILLI_INTRINSICS_H_INCLUDED
 #define FILLI_INTRINSICS_H_INCLUDED
 
+uint16_t print_id;
 void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
 {
-    if (id == lex_ident_offset - insert_or_lookup_id("print", 5))
+    if (id == print_id)
     {
         for (size_t i = 0; i < argcount; i++)
         {
@@ -15,6 +16,7 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
             if (i + 1 < argcount) prints(" ");
         }
         prints("\n");
+        frame->stack[frame->stackpos++] = val_float(0.0);
     }
     else panic("Unknown internal function");
 }
@@ -22,6 +24,7 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
 void register_intrinsic_funcs(void)
 {
     register_intrinsic_func("print");
+    print_id = lex_ident_offset - insert_or_lookup_id("print", 5);
 }
 
 #endif

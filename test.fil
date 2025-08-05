@@ -30,13 +30,18 @@ let n = 6
 if n:
     n -= 1
     print(n)
-    print("iq38934sd")
+    print("sdvkqruwgkqfjaer")
 elif 1.0:
     print("in elif 1")
 elif 1.0:
     print("in elif 2")
 else:
     print("not a thing")
+end
+
+while n:
+    n -= 1
+    print(n)
 end
 
 print("fakjaeirgawfasdsafhsrjyrth")
