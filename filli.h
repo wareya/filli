@@ -479,10 +479,10 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
 size_t compile_statementlist(const char * source, Token * tokens, size_t count, size_t i);
 
 size_t loop_nesting = 0;
-uint32_t locs_cont[1024] = {};
-size_t locs_cont_i = 0;
-uint32_t locs_break[1024] = {};
-size_t locs_break_i = 0;
+uint32_t loop_conts[10000] = {};
+size_t loop_cont_i = 0;
+uint32_t loop_breaks[10000] = {};
+size_t loop_break_i = 0;
 
 size_t compile_statement(const char * source, Token * tokens, size_t count, size_t i)
 {
@@ -537,6 +537,10 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
     if (tokens[i].kind == -5) // while
     {
         loop_nesting++;
+        
+        size_t loop_cont_base = loop_cont_i;
+        size_t loop_break_base = loop_break_i;
+        
         size_t expr_i = i + 1;
         i += compile_expr(source, tokens, count, expr_i, 0) + 1;
         assert(token_is(source, tokens, count, i++, ":"));
@@ -547,13 +551,20 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         i += compile_statementlist(source, tokens, count, i);
         assert(i < count);
         assert(tokens[i].kind == -12, "Missing end keyword"); // end
-        compile_expr(source, tokens, count, expr_i, 0);
+        
+        uint32_t cont_to = prog_i;
+        compile_expr(source, tokens, count, expr_i, 0); // recompile test expr
         prog_write3(INST_JMP_IF_TRUE, 0, 0);
         memcpy(program + (prog_i - 2), &loop_at, 4);
         
         uint32_t end = prog_i;
         memcpy(program + skip_at, &end, 4);
         i += 1;
+        
+        uint32_t break_to = prog_i;
+        
+        while (loop_break_i > loop_break_base) memcpy(program + loop_breaks[--loop_break_i], &break_to, 4);
+        while (loop_cont_i  > loop_cont_base ) memcpy(program + loop_conts [--loop_cont_i ], &cont_to , 4);
         
         loop_nesting--;
         return i - orig_i;
@@ -670,15 +681,16 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         return i - orig_i;
     else if (token_is(source, tokens, count, i, "\n") || token_is(source, tokens, count, i, ";"))
         return 1;
-    else if (token_is(source, tokens, count, i, "continue"))
+    else if (token_is(source, tokens, count, i, "continue")
+             || token_is(source, tokens, count, i, "break"))
     {
         assert(loop_nesting > 0);
-        panic("TODO: implement `continue`");
-    }
-    else if (token_is(source, tokens, count, i, "break"))
-    {
-        assert(loop_nesting > 0);
-        panic("TODO: implement `break`");
+        prog_write3(INST_JMP, 0, 0);
+        if (token_is(source, tokens, count, i, "continue"))
+            loop_conts[loop_cont_i++] = prog_i - 2;
+        else
+            loop_breaks[loop_break_i++] = prog_i - 2;
+        return 1;
     }
     else if (token_is(source, tokens, count, i, "return"))
     {

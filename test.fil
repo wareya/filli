@@ -39,10 +39,15 @@ else:
     print("not a thing")
 end
 
+print("----")
+n = 10
 while n:
     n -= 1
+    if n == 8: continue end
+    if n == 4: break end
     print(n)
 end
+print("----")
 
 print("fakjaeirgawfasdsafhsrjyrth")
 
