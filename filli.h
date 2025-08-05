@@ -583,6 +583,9 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
     else if (token_is(source, tokens, count, i, "for"))
     {
         if (++i >= count) return 0;
+        
+        loop_nesting++;
+        
         int16_t id = lex_ident_offset - tokens[i++].kind;
         if (in_global) globals_registered[id] = 1;
         else           locals_registered[id] = 1;
@@ -610,6 +613,9 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         
         uint32_t end = prog_i;
         memcpy(program + (head - 2), &end, 4);
+        
+        loop_nesting--;
+        
         return i - orig_i;
     }
     else if (i + 2 < count && tokens[i].kind < -lex_ident_offset
@@ -672,6 +678,16 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         return i - orig_i;
     else if (token_is(source, tokens, count, i, "\n") || token_is(source, tokens, count, i, ";"))
         return 1;
+    else if (token_is(source, tokens, count, i, "continue"))
+    {
+        assert(loop_nesting > 0);
+        panic("TODO: implement `continue`");
+    }
+    else if (token_is(source, tokens, count, i, "break"))
+    {
+        assert(loop_nesting > 0);
+        panic("TODO: implement `break`");
+    }
     else if (token_is(source, tokens, count, i, "return"))
     {
         size_t r = compile_expr(source, tokens, count, ++i, 0);
