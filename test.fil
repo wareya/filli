@@ -49,6 +49,13 @@ while n:
 end
 print("----")
 
+for n in 10:
+    if n == 4: continue end
+    if n == 8: break end
+    print(n)
+end
+print("----")
+
 print("fakjaeirgawfasdsafhsrjyrth")
 
 let array = [3,1,4,5];

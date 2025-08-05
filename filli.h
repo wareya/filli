@@ -537,7 +537,6 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
     if (tokens[i].kind == -5) // while
     {
         loop_nesting++;
-        
         size_t loop_cont_base = loop_cont_i;
         size_t loop_break_base = loop_break_i;
         
@@ -562,11 +561,10 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         i += 1;
         
         uint32_t break_to = prog_i;
-        
         while (loop_break_i > loop_break_base) memcpy(program + loop_breaks[--loop_break_i], &break_to, 4);
         while (loop_cont_i  > loop_cont_base ) memcpy(program + loop_conts [--loop_cont_i ], &cont_to , 4);
-        
         loop_nesting--;
+        
         return i - orig_i;
     }
     else if (token_is(source, tokens, count, i, "let"))
@@ -591,6 +589,8 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         if (++i >= count) return 0;
         
         loop_nesting++;
+        size_t loop_cont_base = loop_cont_i;
+        size_t loop_break_base = loop_break_i;
         
         int16_t id = lex_ident_offset - tokens[i++].kind;
         if (in_global) globals_registered[id] = 1;
@@ -612,12 +612,16 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         i += compile_statementlist(source, tokens, count, i);
         assert(tokens[i++].kind == -12, "Missing end keyword");
         
+        uint32_t cont_to = prog_i;
         prog_write5(INST_FOREND, id, idx, 0, 0);
         memcpy(program + (prog_i - 2), &head, 4);
         
         uint32_t end = prog_i;
         memcpy(program + (head - 2), &end, 4);
         
+        uint32_t break_to = prog_i;
+        while (loop_break_i > loop_break_base) memcpy(program + loop_breaks[--loop_break_i], &break_to, 4);
+        while (loop_cont_i  > loop_cont_base ) memcpy(program + loop_conts [--loop_cont_i ], &cont_to , 4);
         loop_nesting--;
         
         return i - orig_i;
