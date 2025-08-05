@@ -258,9 +258,11 @@ Token * tokenize(const char * source, size_t * count)
 enum {
     INST_INVALID,
     // zero-op
-    INST_INDEX = 0x100,
+    INST_RETURN_VAL = 0x100,
+    INST_RETURN_VOID,
     INST_ADD, INST_SUB, INST_MUL, INST_DIV,
     INST_CMP_EQ, INST_CMP_NE, INST_CMP_GT, INST_CMP_LT, INST_CMP_GE, INST_CMP_LE,
+    INST_INDEX,
     // 1-op
     PUSH_FUNCNAME = 0x210,
     PUSH_STRING, // table index
@@ -276,10 +278,10 @@ enum {
     INST_IF = 0x320, // destination
     INST_JMP, // destination
     INST_FUNCDEF, // skip destination
-    INST_FORSTART, // var id (2), for slot (2)
     INST_FUNCCALL, // func id, arg count
     // 4-op
     INST_FOREND = 0x530, // var id (2), for slot (2), destination (4)
+    INST_FORSTART, // var id (2), for slot (2), end of loop (4) (needed if loop val is 0)
     PUSH_NUM, // f64
 };
 
@@ -312,6 +314,8 @@ typedef struct _Funcdef {
     uint8_t exists;
     uint8_t intrinsic;
     uint8_t argcount;
+    uint8_t id;
+    uint32_t loc;
     uint16_t * args;
 } Funcdef;
 
@@ -340,8 +344,12 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
         else if (funcs_registered[lex_ident_offset-tokens[i].kind].exists)
             program[prog_i++] = PUSH_FUNCNAME;
         else
+        {
+            prints(stringdupn(source + tokens[i].i, tokens[i].len));
+            prints("\n");
             panic("Unknown identifier");
-        program[prog_i++] = lex_ident_offset-tokens[i].kind;
+        }
+        program[prog_i++] = lex_ident_offset - tokens[i].kind;
     }
     else if (tokens[i].kind == 1)
     {
@@ -561,6 +569,9 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         program[prog_i++] = INST_FORSTART;
         program[prog_i++] = id;
         program[prog_i++] = idx;
+        size_t skip_at = prog_i;
+        program[prog_i++] = 0;
+        program[prog_i++] = 0;
         
         uint32_t head = prog_i;
         
@@ -576,6 +587,9 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         program[prog_i++] = 0;
         program[prog_i++] = 0;
         memcpy(program + at, &head, 4);
+        
+        uint32_t end = prog_i;
+        memcpy(program + skip_at, &end, 4);
         return i - orig_i;
     }
     else if (i + 2 < count && tokens[i].kind < -lex_ident_offset
@@ -641,6 +655,14 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         return i - orig_i;
     else if (token_is(source, tokens, count, i, "\n"))
         return 1;
+    else if (token_is(source, tokens, count, i, "return"))
+    {
+        i += 1;
+        size_t r = compile_expr(source, tokens, count, i, 0);
+        if (r == 0) program[prog_i++] = INST_RETURN_VOID;
+        else        program[prog_i++] = INST_RETURN_VAL;
+        return r + 1;
+    }
     else
     {
         prints("AT: ");
@@ -664,7 +686,6 @@ size_t compile_statementlist(const char * source, Token * tokens, size_t count, 
 }
 size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
 {
-    memset(locals_registered, 0, sizeof(locals_registered));
     size_t orig_i = i;
     if (i >= count) return 0;
     if (tokens[i].kind >= -12) return 0;
@@ -677,7 +698,8 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
         if (token_is(source, tokens, count, i, ")")) { i += 1; break; }
         if (tokens[i].kind >= -12) return 0;
         assert(j < 256);
-        args[j++] = -tokens[i++].kind;
+        args[j++] = lex_ident_offset - tokens[i++].kind;
+        locals_registered[args[j - 1]] = 1;
         if (!(token_is(source, tokens, count, i, ")")
               || token_is(source, tokens, count, i, ","))) return 0;
         if (token_is(source, tokens, count, i, ",")) i++;
@@ -689,17 +711,18 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
     program[prog_i++] = 0; // part 1 of length
     program[prog_i++] = 0; // part 2 of length
     
-    i += compile_statementlist(source, tokens, count, i);
-    
-    memcpy(program + len_offs, &prog_i, 4);
-    
     funcs_registered[id].exists = 1;
     funcs_registered[id].argcount = j;
+    funcs_registered[id].id = id;
+    funcs_registered[id].loc = prog_i;
     if (j > 0)
     {
         funcs_registered[id].args = (uint16_t *)malloc(sizeof(uint16_t)*j);
         memcpy(funcs_registered[id].args, &args, j * sizeof(uint16_t));
     }
+    
+    i += compile_statementlist(source, tokens, count, i);
+    memcpy(program + len_offs, &prog_i, 4);
     
     return i - orig_i;
 }
@@ -712,7 +735,9 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
         if (tokens[i].kind == -4) // func
         {
             in_global = 0;
+            memset(locals_registered, 0, sizeof(locals_registered));
             r = compile_func(source, tokens, count, i+1);
+            memset(locals_registered, 0, sizeof(locals_registered));
             in_global = 1;
             if (r == 0) panic("Incomplete function");
             i += r + 1;
@@ -738,9 +763,9 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
 struct _Value;
 typedef struct _Array { struct _Value * buf; size_t len; size_t cap; } Array;
 
-enum { VALUE_FLOAT, VALUE_ARRAY, VALUE_STRING }; // tag
+enum { VALUE_FLOAT, VALUE_ARRAY, VALUE_STRING, VALUE_FUNC }; // tag
 typedef struct _Value {
-    union { double f; Array * a; char * s; } u;
+    union { double f; Array * a; char * s; Funcdef * fn; } u;
     uint8_t tag;
 } Value;
 
@@ -748,6 +773,7 @@ Value array_get(Array * a, size_t i) { assert(i < a->len); return a->buf[i]; }
 
 Value val_float(double f) { Value v; v.tag = VALUE_FLOAT; v.u.f = f; return v; }
 Value val_string(char * s) { Value v; v.tag = VALUE_STRING; v.u.s = s; return v; }
+Value val_func(uint16_t id) { Value v; v.tag = VALUE_FUNC; v.u.fn = &funcs_registered[id]; return v; }
 
 typedef struct _Frame {
     size_t pc;
@@ -801,8 +827,10 @@ void interpret(void)
         switch (op) {
     #define CASES_END() } }
     
+    #define PC_INC() frame->pc += op >> 8
+    
     #define MARK_CASE(X) case X: {
-    #define END_CASE() frame->pc += op >> 8; continue; }
+    #define END_CASE() PC_INC(); continue; }
     #define DECAULT_CASE() default: print_op_and_panic(op);
     
     #define NEXT_CASE(X) END_CASE() MARK_CASE(X)
@@ -814,7 +842,10 @@ void interpret(void)
         MARK_CASE(INST_INVALID)
             return;
         NEXT_CASE(INST_FUNCDEF)
-            panic("TODO funcdef");
+            uint32_t target;
+            memcpy(&target, program + (frame->pc + 1), 4);
+            frame->pc = target;
+            continue;
         NEXT_CASE(INST_ARRAY_LITERAL)
             uint16_t itemcount = program[frame->pc + 1];
             Value v;
@@ -826,17 +857,55 @@ void interpret(void)
             while (itemcount > 0)
                 v.u.a->buf[--itemcount] = frame->stack[--frame->stackpos];
             frame->stack[frame->stackpos++] = v;
+        
+        #define ENTER_FUNC()\
+            assert(fn->exists);\
+            if (fn->intrinsic)\
+            {\
+                handle_intrinsic_func(fn->id, argcount, frame);\
+                frame->stackpos -= argcount;\
+            }\
+            else\
+            {\
+                Frame * prev = frame;\
+                Frame * next = (Frame *)malloc(sizeof(Frame));\
+                if (!next) panic("Out of memory");\
+                PC_INC();\
+                next->return_to = frame;\
+                frame = next;\
+                assert(argcount == fn->argcount);\
+                for (size_t i = fn->argcount; i > 0;)\
+                    frame->vars[fn->args[--i]] = prev->stack[--prev->stackpos];\
+                prev->stack[--prev->stackpos];\
+                frame->pc = fn->loc;\
+                continue;\
+            }
+        
         NEXT_CASE(INST_FUNCCALL)
             uint16_t id = program[frame->pc + 1];
             uint16_t argcount = program[frame->pc + 2];
-            assert(funcs_registered[id].exists);
-            if (funcs_registered[id].intrinsic)
-            {
-                handle_intrinsic_func(id, argcount, frame);
-                frame->stackpos -= argcount;
-            }
-            else
-                panic("TODO funccall");
+            Funcdef * fn = &funcs_registered[id];
+            ENTER_FUNC()
+        NEXT_CASE(INST_FUNCCALL_EXPR)
+            uint16_t argcount = program[frame->pc + 1];
+            Value v_func = frame->stack[frame->stackpos - argcount - 1];
+            assert(v_func.tag == VALUE_FUNC);
+            Funcdef * fn = v_func.u.fn;
+            ENTER_FUNC()
+        
+        NEXT_CASE(INST_RETURN_VAL)
+            Value v = frame->stack[--frame->stackpos];
+            if (!frame->return_to) return;
+            frame = frame->return_to;
+            frame->stack[frame->stackpos++] = v;
+            continue;
+        
+        NEXT_CASE(INST_RETURN_VOID)
+            if (!frame->return_to) return;
+            frame = frame->return_to;
+            frame->stack[frame->stackpos++] = val_float(0.0);
+            continue;
+        
         NEXT_CASE(PUSH_NUM)
             double f;
             memcpy(&f, program + frame->pc + 1, 8);
@@ -855,7 +924,7 @@ void interpret(void)
             uint16_t id = program[frame->pc + 1];\
             Value v1 = global_frame->vars[id];\
             assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
-            
+        
         NEXT_CASE(INST_ASSIGN_GLOBAL_ADD)    GLOBAL_MATH_SHARED()
             global_frame->vars[id] = val_float(v1.u.f + v2.u.f);
         NEXT_CASE(INST_ASSIGN_GLOBAL_SUB)    GLOBAL_MATH_SHARED()
@@ -883,28 +952,27 @@ void interpret(void)
             Value v2 = frame->stack[--frame->stackpos];\
             Value v1 = frame->stack[--frame->stackpos];\
             int8_t equality = 0;\
-            if (v2.tag != v1.tag) equality = 1;\
-            else if (v1.tag == VALUE_FLOAT && (v1.u.f != v1.u.f || v2.u.f != v2.u.f)) equality = 1;\
-            else if (v1.tag == VALUE_FLOAT && v1.u.f > v2.u.f) equality = -1;\
-            else if (v1.tag == VALUE_FLOAT && v1.u.f < v2.u.f) equality = -2;\
+            if (v2.tag != v1.tag) equality = 2;\
+            else if (v1.tag == VALUE_FLOAT && (v1.u.f != v1.u.f || v2.u.f != v2.u.f)) equality = 2;\
+            else if (v1.tag == VALUE_FLOAT && v1.u.f < v2.u.f) equality = -1;\
+            else if (v1.tag == VALUE_FLOAT && v1.u.f > v2.u.f) equality = 1;\
             else if (v1.tag == VALUE_FLOAT && v1.u.f == v2.u.f) equality = 0;\
             else if (v1.tag == VALUE_STRING) equality = strcmp(v1.u.s, v2.u.s);\
-            else if (v1.tag == VALUE_ARRAY) equality = v1.u.a != v2.u.a;
+            else if (v1.tag == VALUE_ARRAY) equality = (v1.u.a != v2.u.a) * 2;
             // 0: equal, 1: neq (unordered). -2: lt. -1: gt.
         
         NEXT_CASE(INST_CMP_EQ)    EQ_SHARED()
             frame->stack[frame->stackpos++] = val_float(equality == 0);
         NEXT_CASE(INST_CMP_NE)    EQ_SHARED()
             frame->stack[frame->stackpos++] = val_float(equality != 0);
+        NEXT_CASE(INST_CMP_LE)    EQ_SHARED()
+            frame->stack[frame->stackpos++] = val_float(equality == 0 || equality == 1);
         NEXT_CASE(INST_CMP_GE)    EQ_SHARED()
             frame->stack[frame->stackpos++] = val_float(equality == 0 || equality == -1);
-        NEXT_CASE(INST_CMP_LE)    EQ_SHARED()
-            frame->stack[frame->stackpos++] = val_float(equality == 0 || equality == -2);
+        NEXT_CASE(INST_CMP_LT)    EQ_SHARED()
+            frame->stack[frame->stackpos++] = val_float(equality == 1);
         NEXT_CASE(INST_CMP_GT)    EQ_SHARED()
             frame->stack[frame->stackpos++] = val_float(equality == -1);
-        NEXT_CASE(INST_CMP_LT)    EQ_SHARED()
-            frame->stack[frame->stackpos++] = val_float(equality == -2);
-            
             
         NEXT_CASE(INST_FORSTART)
             Value v = frame->stack[--frame->stackpos];
@@ -915,6 +983,13 @@ void interpret(void)
             double temp = v.u.f;
             assert(temp - 1.0 != temp, "For loop value is too large and will never terminate");
             frame->vars[id] = val_float(0.0);
+            if (temp < 1.0)
+            {
+                uint32_t target;
+                memcpy(&target, program + (frame->pc + 3), 4);
+                frame->pc = target;
+                continue;
+            }
         NEXT_CASE(INST_FOREND)
             uint16_t id = program[frame->pc + 1];
             assert(frame->vars[id].tag == VALUE_FLOAT, "For loops can only operate on numbers");
@@ -936,19 +1011,32 @@ void interpret(void)
         NEXT_CASE(INST_IF)
             panic("TODO");
         NEXT_CASE(PUSH_LOCAL)
-            panic("TODO");
+            uint16_t id = program[frame->pc + 1];
+            frame->stack[frame->stackpos++] = frame->vars[id];
         NEXT_CASE(PUSH_FUNCNAME)
-            panic("TODO");
+            uint16_t id = program[frame->pc + 1];
+            frame->stack[frame->stackpos++] = val_func(id);
+        
         NEXT_CASE(INST_ASSIGN)
-            panic("TODO");
-        NEXT_CASE(INST_ASSIGN_ADD)
-            panic("TODO");
-        NEXT_CASE(INST_ASSIGN_SUB)
-            panic("TODO");
-        NEXT_CASE(INST_ASSIGN_MUL)
-            panic("TODO");
-        NEXT_CASE(INST_ASSIGN_DIV)
-            panic("TODO");
+            Value v = frame->stack[--frame->stackpos];
+            uint16_t id = program[frame->pc + 1];
+            frame->vars[id] = v;
+        
+        #define LOCAL_MATH_SHARED()\
+            Value v2 = frame->stack[--frame->stackpos];\
+            uint16_t id = program[frame->pc + 1];\
+            Value v1 = frame->vars[id];\
+            assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
+        
+        NEXT_CASE(INST_ASSIGN_ADD)    LOCAL_MATH_SHARED()
+            frame->vars[id] = val_float(v1.u.f + v2.u.f);
+        NEXT_CASE(INST_ASSIGN_SUB)    LOCAL_MATH_SHARED()
+            frame->vars[id] = val_float(v1.u.f - v2.u.f);
+        NEXT_CASE(INST_ASSIGN_MUL)    LOCAL_MATH_SHARED()
+            frame->vars[id] = val_float(v1.u.f * v2.u.f);
+        NEXT_CASE(INST_ASSIGN_DIV)    LOCAL_MATH_SHARED()
+            frame->vars[id] = val_float(v1.u.f /     v2.u.f);
+        
         NEXT_CASE(INST_INDEX)
             Value v2 = frame->stack[--frame->stackpos];
             Value v1 = frame->stack[--frame->stackpos];
@@ -973,6 +1061,7 @@ void register_intrinsic_func(const char * s)
     int16_t id = lex_ident_offset - insert_or_lookup_id(s, strlen(s));
     funcs_registered[id].exists = 1;
     funcs_registered[id].intrinsic = 1;
+    funcs_registered[id].id = id;
 }
 int main(int argc, char ** argv)
 {

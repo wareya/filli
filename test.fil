@@ -1,11 +1,16 @@
 
-let n = 10000000
-let sum = 0
-let flip = 1
-for i in n:
-    sum += flip / (2 * i + 1)
-    flip *= -1
+func calc(n):
+    let sum = 0
+    let flip = 1
+    for i in n:
+        sum += flip / (2 * i + 1)
+        flip *= -1
+    end
+    return sum
 end
+
+let sum = calc(10000000)
+
 print(sum * 4)
 print("Done!")
 print("Done!"[4])
