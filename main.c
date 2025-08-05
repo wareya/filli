@@ -382,11 +382,8 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
         double f = badstrtod(s);
         free(s);
         
-        program[prog_i++] = 0;
-        program[prog_i++] = 0;
-        program[prog_i++] = 0;
-        program[prog_i++] = 0;
-        memcpy(program + prog_i - 4, &f, 8);
+        memcpy(program + prog_i, &f, 8);
+        prog_i += 4;
     }
     
     return 1;
@@ -406,8 +403,7 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
     }
     if (token_is(source, tokens, count, i, "[")) // array literal
     {
-        size_t orig_i = i;
-        i += 1; // [
+        size_t orig_i = i++; // skip [
         
         uint16_t j = 0;
         while (!token_is(source, tokens, count, i, "]"))
@@ -417,8 +413,7 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
             assert(j++ < 32000, "Too many values in array literal (limit is 32000)");
             i += r;
             
-            if (!(token_is(source, tokens, count, i, "]")
-                || token_is(source, tokens, count, i, ","))) return 0;
+            if (!(token_is(source, tokens, count, i, "]") || token_is(source, tokens, count, i, ","))) return 0;
             if (token_is(source, tokens, count, i, ",")) i++;
         }
         if (!token_is(source, tokens, count, i++, "]")) return 0;
@@ -493,14 +488,17 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
     else if (token_is(source, tokens, count, i, "["))
     {
         inst = INST_INDEX;
-        i += r + 1;
+        i += ++r;
         assert(token_is(source, tokens, count, i++, "]"));
-        r += 1;
     }
     else panic("TODO");
     program[prog_i++] = inst;
     return r + 1;
 }
+
+
+void inst_push3(uint16_t a, uint16_t b, uint16_t c)
+    { program[prog_i++] = a; program[prog_i++] = b; program[prog_i++] = c; }
 
 size_t compile_statementlist(const char * source, Token * tokens, size_t count, size_t i);
 
@@ -514,8 +512,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         assert(token_is(source, tokens, count, i++, ":"));
         program[prog_i++] = INST_JMP_IF_FALSE;
         size_t jump_at = prog_i;
-        program[prog_i++] = 0; // word 1
-        program[prog_i++] = 0; // word 2
+        prog_i += 2;
         
         i += compile_statementlist(source, tokens, count, i);
         assert(i < count);
@@ -540,8 +537,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         assert(token_is(source, tokens, count, i++, ":"));
         program[prog_i++] = INST_JMP_IF_FALSE;
         size_t skip_at = prog_i;
-        program[prog_i++] = 0; // word 1
-        program[prog_i++] = 0; // word 2
+        prog_i += 2;
         uint32_t loop_at = prog_i;
         
         i += compile_statementlist(source, tokens, count, i);
@@ -550,8 +546,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         {
             compile_expr(source, tokens, count, expr_i, 0);
             program[prog_i++] = INST_JMP_IF_TRUE;
-            program[prog_i++] = 0; // word 1
-            program[prog_i++] = 0; // word 2
+            prog_i += 2;
             memcpy(program + (prog_i - 2), &loop_at, 4);
             
             uint32_t end = prog_i;
@@ -566,18 +561,15 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
     {
         if (++i >= count) return 0;
         int16_t id = lex_ident_offset - tokens[i++].kind;
-        if (in_global)
-            globals_registered[id] = 1;
-        else
-            locals_registered[id] = 1;
+        if (in_global) globals_registered[id] = 1;
+        else           locals_registered[id] = 1;
         if (token_is(source, tokens, count, i, "="))
         {
             size_t r = compile_expr(source, tokens, count, i + 1, 0);
             if (r)
             {
                 i += r + 1;
-                program[prog_i++] = INST_ASSIGN;
-                if (in_global) program[prog_i - 1] += 1;
+                program[prog_i++] = INST_ASSIGN + in_global;
                 program[prog_i++] = id;
             }
         }
@@ -587,10 +579,8 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
     {
         if (++i >= count) return 0;
         int16_t id = lex_ident_offset - tokens[i++].kind;
-        if (in_global)
-            globals_registered[id] = 1;
-        else
-            locals_registered[id] = 1;
+        if (in_global) globals_registered[id] = 1;
+        else           locals_registered[id] = 1;
         assert(token_is(source, tokens, count, i++, "in"));
         uint16_t idx = for_loop_index++;
         assert(idx < FORLOOP_COUNT_LIMIT, "Too many for loops (max 256 per function or in root scope)")
@@ -599,12 +589,9 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         assert(ret > 0, "For loop requires valid expression")
         i += ret;
         
-        program[prog_i++] = INST_FORSTART;
-        program[prog_i++] = id;
-        program[prog_i++] = idx;
+        inst_push3(INST_FORSTART, id, idx);
         size_t skip_at = prog_i;
-        program[prog_i++] = 0;
-        program[prog_i++] = 0;
+        prog_i += 2;
         
         uint32_t head = prog_i;
         
@@ -613,12 +600,9 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         i += compile_statementlist(source, tokens, count, i);
         assert(tokens[i++].kind == -12, "Missing end keyword");
         
-        program[prog_i++] = INST_FOREND;
-        program[prog_i++] = id;
-        program[prog_i++] = idx;
+        inst_push3(INST_FOREND, id, idx);
         size_t at = prog_i;
-        program[prog_i++] = 0;
-        program[prog_i++] = 0;
+        prog_i += 2;
         memcpy(program + at, &head, 4);
         
         uint32_t end = prog_i;
@@ -662,8 +646,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
              && token_is(source, tokens, count, i+1, "(")
              && funcs_registered[lex_ident_offset - tokens[i].kind].exists)
     {
-        uint16_t id = lex_ident_offset - tokens[i].kind;
-        i += 1; // func name
+        uint16_t id = lex_ident_offset - tokens[i++].kind;
         i += 1; // (
         
         uint16_t j = 0;
@@ -680,9 +663,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         }
         if (!token_is(source, tokens, count, i++, ")")) return 0;
         
-        program[prog_i++] = INST_FUNCCALL;
-        program[prog_i++] = id;
-        program[prog_i++] = j;
+        inst_push3(INST_FUNCCALL, id, j);
         
         program[prog_i++] = INST_DISCARD;
         return i - orig_i;
@@ -751,8 +732,7 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
     
     program[prog_i++] = INST_FUNCDEF;
     size_t len_offs = prog_i;
-    program[prog_i++] = 0; // part 1 of length
-    program[prog_i++] = 0; // part 2 of length
+    prog_i += 2;
     
     funcs_registered[id].exists = 1;
     funcs_registered[id].argcount = j;
@@ -889,11 +869,10 @@ void interpret(void)
     
     CASES_START()
         
-        MARK_CASE(INST_INVALID)
-            return;
+        MARK_CASE(INST_INVALID)    return;
         
-        NEXT_CASE(INST_DISCARD)
-            --frame->stackpos;
+        NEXT_CASE(INST_DISCARD)    --frame->stackpos;
+        
         NEXT_CASE(INST_FUNCDEF)
             uint32_t target;
             memcpy(&target, program + (frame->pc + 1), 4);
@@ -1026,6 +1005,12 @@ void interpret(void)
             frame->stack[frame->stackpos++] = val_float(equality == 1);
         NEXT_CASE(INST_CMP_GT)    EQ_SHARED()
             frame->stack[frame->stackpos++] = val_float(equality == -1);
+        
+        #define READ_AND_GOTO_TARGET(X)\
+            { uint32_t target;\
+            memcpy(&target, program + (frame->pc + X), 4);\
+            frame->pc = target;\
+            continue; }
             
         NEXT_CASE(INST_FORSTART)
             Value v = frame->stack[--frame->stackpos];
@@ -1037,45 +1022,21 @@ void interpret(void)
             assert(temp - 1.0 != temp, "For loop value is too large and will never terminate");
             frame->vars[id] = val_float(0.0);
             if (temp < 1.0)
-            {
-                uint32_t target;
-                memcpy(&target, program + (frame->pc + 3), 4);
-                frame->pc = target;
-                continue;
-            }
+                READ_AND_GOTO_TARGET(3)
         NEXT_CASE(INST_FOREND)
             uint16_t id = program[frame->pc + 1];
             assert(frame->vars[id].tag == VALUE_FLOAT, "For loops can only operate on numbers");
             uint16_t idx = program[frame->pc + 2];
-            uint32_t target;
-            memcpy(&target, program + (frame->pc + 3), 4);
             frame->vars[id].u.f += 1.0;
             if (frame->vars[id].u.f < frame->forloops[idx])
-            {
-                frame->pc = target;
-                continue;
-            }
+                READ_AND_GOTO_TARGET(3)
+        
         NEXT_CASE(INST_JMP)
-            uint32_t target;
-            memcpy(&target, program + (frame->pc + 1), 4);
-            frame->pc = target;
-            continue;
+            READ_AND_GOTO_TARGET(1)
         NEXT_CASE(INST_JMP_IF_FALSE)
-            if (!val_truthy(frame->stack[--frame->stackpos]))
-            {
-                uint32_t target;
-                memcpy(&target, program + (frame->pc + 1), 4);
-                frame->pc = target;
-                continue;
-            }
+            if (!val_truthy(frame->stack[--frame->stackpos])) READ_AND_GOTO_TARGET(1)
         NEXT_CASE(INST_JMP_IF_TRUE)
-            if (val_truthy(frame->stack[--frame->stackpos]))
-            {
-                uint32_t target;
-                memcpy(&target, program + (frame->pc + 1), 4);
-                frame->pc = target;
-                continue;
-            }
+            if (val_truthy(frame->stack[--frame->stackpos])) READ_AND_GOTO_TARGET(1)
         
         NEXT_CASE(PUSH_STRING)
             uint16_t id = program[frame->pc + 1];
