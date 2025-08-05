@@ -24,3 +24,12 @@ print(0/0 == 1/0)
 print(0/0 == 0/0)
 print(0/0 != 0/0)
 print(0/0 != 1/0)
+
+print("-----")
+let n = 6
+while n:
+    n -= 1
+    print(n)
+end
+
+print("fakjaeirgawfasdsafhsrjyrth")

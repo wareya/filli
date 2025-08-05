@@ -162,8 +162,10 @@ void lex_init(void)
     insert_or_lookup_id("let", 3);       // 10
     insert_or_lookup_id("begin", 3);     // 11
     insert_or_lookup_id("end", 3);       // 12
+    insert_or_lookup_id("null", 4);      // 13
     lex_ident_offset = highest_ident_id;
 }
+#define MIN_KEYWORD -13
 
 Token * tokenize(const char * source, size_t * count)
 {
@@ -275,8 +277,9 @@ enum {
     INST_FUNCCALL_EXPR, // arg count
     INST_ARRAY_LITERAL, // item count
     // 2-op
-    INST_IF = 0x320, // destination
-    INST_JMP, // destination
+    INST_JMP = 0x320, // destination
+    INST_JMP_IF_FALSE, // destination
+    INST_JMP_IF_TRUE, // destination
     INST_FUNCDEF, // skip destination
     INST_FUNCCALL, // func id, arg count
     // 4-op
@@ -509,20 +512,50 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
     {
         i += compile_expr(source, tokens, count, i + 1, 0) + 1;
         assert(token_is(source, tokens, count, i++, ":"));
-        program[prog_i++] = INST_IF;
+        program[prog_i++] = INST_JMP_IF_FALSE;
         size_t jump_at = prog_i;
         program[prog_i++] = 0; // word 1
         program[prog_i++] = 0; // word 2
         
         i += compile_statementlist(source, tokens, count, i);
         assert(i < count);
-        if (tokens[i].kind == -2 || tokens[i].kind == -3) // elif
+        if (tokens[i].kind == -2 || tokens[i].kind == -3) // else/elif
         {
             panic("TODO 1");
         }
         else if (tokens[i].kind == -12) // end
         {
-            memcpy(program + jump_at, &prog_i, 4);
+            uint32_t end = prog_i;
+            memcpy(program + jump_at, &end, 4);
+            i += 1;
+        }
+        else panic("Missing end keyword");
+        
+        return i - orig_i;
+    }
+    if (tokens[i].kind == -5) // while
+    {
+        size_t expr_i = i + 1;
+        i += compile_expr(source, tokens, count, expr_i, 0) + 1;
+        assert(token_is(source, tokens, count, i++, ":"));
+        program[prog_i++] = INST_JMP_IF_FALSE;
+        size_t skip_at = prog_i;
+        program[prog_i++] = 0; // word 1
+        program[prog_i++] = 0; // word 2
+        uint32_t loop_at = prog_i;
+        
+        i += compile_statementlist(source, tokens, count, i);
+        assert(i < count);
+        if (tokens[i].kind == -12) // end
+        {
+            compile_expr(source, tokens, count, expr_i, 0);
+            program[prog_i++] = INST_JMP_IF_TRUE;
+            program[prog_i++] = 0; // word 1
+            program[prog_i++] = 0; // word 2
+            memcpy(program + (prog_i - 2), &loop_at, 4);
+            
+            uint32_t end = prog_i;
+            memcpy(program + skip_at, &end, 4);
             i += 1;
         }
         else panic("Missing end keyword");
@@ -656,7 +689,8 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
     }
     else if (tokens[i].kind == -12) // end
         return i - orig_i;
-    else if (token_is(source, tokens, count, i, "\n"))
+    else if (token_is(source, tokens, count, i, "\n")
+             || token_is(source, tokens, count, i, ";"))
         return 1;
     else if (token_is(source, tokens, count, i, "return"))
     {
@@ -697,7 +731,7 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
 {
     size_t orig_i = i;
     if (i >= count) return 0;
-    if (tokens[i].kind >= -12) return 0;
+    if (tokens[i].kind >= MIN_KEYWORD) return 0;
     int16_t id = lex_ident_offset - tokens[i++].kind;
     if (!token_is(source, tokens, count, i++, "(")) return 0;
     uint16_t args[256]; // at most 256 args per function
@@ -705,7 +739,7 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
     while (1)
     {
         if (token_is(source, tokens, count, i, ")")) { i += 1; break; }
-        if (tokens[i].kind >= -12) return 0;
+        if (tokens[i].kind >= MIN_KEYWORD) return 0;
         assert(j < 256);
         args[j++] = lex_ident_offset - tokens[i++].kind;
         locals_registered[args[j - 1]] = 1;
@@ -754,9 +788,7 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
             if (tokens[i++].kind != -12) panic("Missing end keyword");
         }
         else if ((r = compile_statement(source, tokens, count, i)))
-        {
             i += r;
-        }
         else
         {
             prints("AT: ");
@@ -772,7 +804,7 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
 struct _Value;
 typedef struct _Array { struct _Value * buf; size_t len; size_t cap; } Array;
 
-enum { VALUE_FLOAT, VALUE_ARRAY, VALUE_STRING, VALUE_FUNC }; // tag
+enum { VALUE_FLOAT, VALUE_ARRAY, VALUE_STRING, VALUE_FUNC, VALUE_NULL }; // tag
 typedef struct _Value {
     union { double f; Array * a; char * s; Funcdef * fn; } u;
     uint8_t tag;
@@ -783,6 +815,15 @@ Value array_get(Array * a, size_t i) { assert(i < a->len); return a->buf[i]; }
 Value val_float(double f) { Value v; v.tag = VALUE_FLOAT; v.u.f = f; return v; }
 Value val_string(char * s) { Value v; v.tag = VALUE_STRING; v.u.s = s; return v; }
 Value val_func(uint16_t id) { Value v; v.tag = VALUE_FUNC; v.u.fn = &funcs_registered[id]; return v; }
+
+uint8_t val_truthy(Value v)
+{
+    if (v.tag == VALUE_FLOAT) return v.u.f != 0.0;
+    if (v.tag == VALUE_STRING) return v.u.s[0] != 0;
+    if (v.tag == VALUE_ARRAY) return v.u.a->len > 0;
+    if (v.tag == VALUE_FUNC) return 1;
+    return 0;
+}
 
 typedef struct _Frame {
     size_t pc;
@@ -1015,9 +1056,26 @@ void interpret(void)
                 continue;
             }
         NEXT_CASE(INST_JMP)
-            panic("TODO");
-        NEXT_CASE(INST_IF)
-            panic("TODO");
+            uint32_t target;
+            memcpy(&target, program + (frame->pc + 1), 4);
+            frame->pc = target;
+            continue;
+        NEXT_CASE(INST_JMP_IF_FALSE)
+            if (!val_truthy(frame->stack[--frame->stackpos]))
+            {
+                uint32_t target;
+                memcpy(&target, program + (frame->pc + 1), 4);
+                frame->pc = target;
+                continue;
+            }
+        NEXT_CASE(INST_JMP_IF_TRUE)
+            if (val_truthy(frame->stack[--frame->stackpos]))
+            {
+                uint32_t target;
+                memcpy(&target, program + (frame->pc + 1), 4);
+                frame->pc = target;
+                continue;
+            }
         
         NEXT_CASE(PUSH_STRING)
             uint16_t id = program[frame->pc + 1];
