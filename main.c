@@ -337,6 +337,7 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
 {
     if (i >= count) return 0;
     if (tokens[i].kind > 1) return 0;
+    if (tokens[i].kind < 0 && tokens[i].kind >= MIN_KEYWORD) return 0;
     
     if (tokens[i].kind < 0)
     {
@@ -502,6 +503,12 @@ void inst_push3(uint16_t a, uint16_t b, uint16_t c)
 
 size_t compile_statementlist(const char * source, Token * tokens, size_t count, size_t i);
 
+size_t loop_nesting = 0;
+uint32_t locs_cont[1024] = {};
+size_t locs_cont_i = 0;
+uint32_t locs_break[1024] = {};
+size_t locs_break_i = 0;
+
 size_t compile_statement(const char * source, Token * tokens, size_t count, size_t i)
 {
     if (i >= count) return 0;
@@ -515,23 +522,58 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         prog_i += 2;
         
         i += compile_statementlist(source, tokens, count, i);
-        assert(i < count);
-        if (tokens[i].kind == -2 || tokens[i].kind == -3) // else/elif
+        
+        uint32_t end;
+        if (tokens[i].kind == -3 || tokens[i].kind == -2)
+            end = prog_i + 3;
+        else
+            end = prog_i;
+        memcpy(program + jump_at, &end, 4);
+        
+        uint32_t skips[256] = {};
+        size_t skip_i = 0;
+        
+        while (tokens[i].kind == -3 || tokens[i].kind == -2) // elif, else
         {
-            panic("TODO 1");
+            // add on to previous block: skip this and the rest of the blocks
+            program[prog_i++] = INST_JMP;
+            skips[skip_i++] = prog_i;
+            prog_i += 2;
+            
+            if (tokens[i].kind == -3)
+            {
+                i += compile_expr(source, tokens, count, i + 1, 0) + 1;
+                assert(token_is(source, tokens, count, i++, ":"));
+                program[prog_i++] = INST_JMP_IF_FALSE;
+                size_t jump_at = prog_i;
+                prog_i += 2;
+                
+                i += compile_statementlist(source, tokens, count, i);
+                
+                uint32_t end;
+                if (tokens[i].kind == -3 || tokens[i].kind == -2)
+                    end = prog_i + 3;
+                else
+                    end = prog_i;
+                memcpy(program + jump_at, &end, 4);
+            }
+            else if (++i)
+            {
+                assert(token_is(source, tokens, count, i++, ":"));
+                i += compile_statementlist(source, tokens, count, i);
+            }
         }
-        else if (tokens[i].kind == -12) // end
-        {
-            uint32_t end = prog_i;
-            memcpy(program + jump_at, &end, 4);
-            i += 1;
-        }
-        else panic("Missing end keyword");
+        if (tokens[i].kind != -12) // end
+            panic("Missing end keyword");
+        uint32_t real_end = prog_i;
+        while (skip_i > 0) memcpy(program + skips[--skip_i], &real_end, 4);
+        i += 1;
         
         return i - orig_i;
     }
     if (tokens[i].kind == -5) // while
     {
+        loop_nesting++;
         size_t expr_i = i + 1;
         i += compile_expr(source, tokens, count, expr_i, 0) + 1;
         assert(token_is(source, tokens, count, i++, ":"));
@@ -555,6 +597,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         }
         else panic("Missing end keyword");
         
+        loop_nesting--;
         return i - orig_i;
     }
     else if (token_is(source, tokens, count, i, "let"))
@@ -590,7 +633,6 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         i += ret;
         
         inst_push3(INST_FORSTART, id, idx);
-        size_t skip_at = prog_i;
         prog_i += 2;
         
         uint32_t head = prog_i;
@@ -606,7 +648,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         memcpy(program + at, &head, 4);
         
         uint32_t end = prog_i;
-        memcpy(program + skip_at, &end, 4);
+        memcpy(program + (head - 2), &end, 4);
         return i - orig_i;
     }
     else if (i + 2 < count && tokens[i].kind < -lex_ident_offset
@@ -668,7 +710,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         program[prog_i++] = INST_DISCARD;
         return i - orig_i;
     }
-    else if (tokens[i].kind == -12) // end
+    else if (tokens[i].kind == -12 || tokens[i].kind == -3 || tokens[i].kind == -2) // end, elif, else
         return i - orig_i;
     else if (token_is(source, tokens, count, i, "\n")
              || token_is(source, tokens, count, i, ";"))

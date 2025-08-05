@@ -27,9 +27,16 @@ print(0/0 != 1/0)
 
 print("-----")
 let n = 6
-while n:
+if n:
     n -= 1
     print(n)
+    print("iq38934sd")
+elif 1.0:
+    print("in elif 1")
+elif 1.0:
+    print("in elif 2")
+else:
+    print("not a thing")
 end
 
 print("fakjaeirgawfasdsafhsrjyrth")
