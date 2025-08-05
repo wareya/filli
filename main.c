@@ -247,8 +247,10 @@ enum {
     INST_ADD, INST_SUB, INST_MUL, INST_DIV,
     INST_CMP_EQ, INST_CMP_NE, INST_CMP_GT, INST_CMP_LT, INST_CMP_GE, INST_CMP_LE,
     INST_INDEX,
+    INST_INDEX_ADDR, INST_ASSIGN_ADDR,
+    INST_ASSIGN_ADDR_ADD, INST_ASSIGN_ADDR_SUB, INST_ASSIGN_ADDR_MUL, INST_ASSIGN_ADDR_DIV,
     // 1-op
-    PUSH_FUNCNAME = 0x210,
+    PUSH_FUNCNAME = 0x220,
     PUSH_STRING, // table index
     PUSH_LOCAL, PUSH_GLOBAL,
     INST_ASSIGN, INST_ASSIGN_GLOBAL,
@@ -259,13 +261,13 @@ enum {
     INST_FUNCCALL_EXPR, // arg count
     INST_ARRAY_LITERAL, // item count
     // 2-op
-    INST_JMP = 0x320, // destination
+    INST_JMP = 0x340, // destination
     INST_JMP_IF_FALSE, // destination
     INST_JMP_IF_TRUE, // destination
     INST_FUNCDEF, // skip destination
     INST_FUNCCALL, // func id, arg count
     // 4-op
-    INST_FOREND = 0x530, // var id (2), for slot (2), destination (4)
+    INST_FOREND = 0x560, // var id (2), for slot (2), destination (4)
     INST_FORSTART, // var id (2), for slot (2), end of loop (4) (needed if loop val is 0)
     PUSH_NUM, // f64
 };
@@ -576,12 +578,10 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         if (token_is(source, tokens, count, i, "="))
         {
             size_t r = compile_expr(source, tokens, count, i + 1, 0);
-            if (r)
-            {
-                i += r + 1;
-                program[prog_i++] = INST_ASSIGN + in_global;
-                program[prog_i++] = id;
-            }
+            if (!r) return i - orig_i;
+            i += r + 1;
+            program[prog_i++] = INST_ASSIGN + in_global;
+            program[prog_i++] = id;
         }
         return i - orig_i;
     }
@@ -698,7 +698,28 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
             prints("\n");
             panic("TODO");
         }
-        program[prog_i++] = INST_DISCARD;
+        i += r;
+        
+        if ((token_is(source, tokens, count, i, "=")
+             || token_is(source, tokens, count, i, "+=")
+             || token_is(source, tokens, count, i, "-=")
+             || token_is(source, tokens, count, i, "*=")
+             || token_is(source, tokens, count, i, "/="))
+            && program[prog_i - 1] == INST_INDEX)
+        {
+            size_t old_i = i;
+            uint32_t checkpoint = prog_i - 1;
+            size_t r2 = compile_expr(source, tokens, count, i + 1, 0);
+            if (!r2) { program[prog_i++] = INST_DISCARD; return r; }
+            r += r2 + 1;
+            program[checkpoint] = INST_INDEX_ADDR;
+            if (token_is(source, tokens, count, old_i, "=")) program[prog_i++] = INST_ASSIGN_ADDR;
+            if (token_is(source, tokens, count, old_i, "+=")) program[prog_i++] = INST_ASSIGN_ADDR_ADD;
+            if (token_is(source, tokens, count, old_i, "-=")) program[prog_i++] = INST_ASSIGN_ADDR_SUB;
+            if (token_is(source, tokens, count, old_i, "*=")) program[prog_i++] = INST_ASSIGN_ADDR_MUL;
+            if (token_is(source, tokens, count, old_i, "/=")) program[prog_i++] = INST_ASSIGN_ADDR_DIV;
+        }
+        else program[prog_i++] = INST_DISCARD;
         return r;
     }
 }
@@ -796,7 +817,7 @@ typedef struct _Value {
     uint8_t tag;
 } Value;
 
-Value array_get(Array * a, size_t i) { assert(i < a->len); return a->buf[i]; }
+Value * array_get(Array * a, size_t i) { assert(i < a->len); return a->buf + i; }
 
 Value val_float(double f) { Value v; v.tag = VALUE_FLOAT; v.u.f = f; return v; }
 Value val_string(char * s) { Value v; v.tag = VALUE_STRING; v.u.s = s; return v; }
@@ -815,6 +836,8 @@ typedef struct _Frame {
     size_t pc;
     struct _Frame * return_to;
     size_t stackpos;
+    Value * assign_target_agg;
+    char * assign_target_char;
     Value vars[FRAME_VARCOUNT];
     Value stack[FRAME_STACKSIZE];
     double forloops[FORLOOP_COUNT_LIMIT];
@@ -1072,21 +1095,58 @@ void interpret(void)
         NEXT_CASE(INST_ASSIGN_DIV)    LOCAL_MATH_SHARED()
             frame->vars[id] = val_float(v1.u.f / v2.u.f);
         
-        NEXT_CASE(INST_INDEX)
-            Value v2 = frame->stack[--frame->stackpos];
-            Value v1 = frame->stack[--frame->stackpos];
-            assert(v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY);
             
-            if (v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY)
-                assert(v2.tag == VALUE_FLOAT);
-            if (v1.tag == VALUE_STRING)
+        NEXT_CASE(INST_ASSIGN_ADDR)
+            Value v2 = frame->stack[--frame->stackpos];
+            if (frame->assign_target_agg)
             {
-                assert(((size_t)v2.u.f) < strlen(v1.u.s));
-                v1.u.s = stringdupn(v1.u.s + (size_t)v2.u.f, 1);
+                *frame->assign_target_agg = v2;
+                frame->assign_target_agg = 0;
             }
+            else
+            {
+                assert(frame->assign_target_char && v2.tag == VALUE_STRING);
+                *frame->assign_target_char = *v2.u.s;
+                frame->assign_target_char = 0;
+            }
+        
+        #define ADDR_MATH_SHARED()\
+            Value v2 = frame->stack[--frame->stackpos];\
+            Value * v1p = frame->assign_target_agg;\
+            assert(v1p && v2.tag == VALUE_FLOAT && v1p->tag == VALUE_FLOAT, "Math only works on numbers");\
+            frame->assign_target_agg = 0;
+        
+        NEXT_CASE(INST_ASSIGN_ADDR_ADD)    ADDR_MATH_SHARED()
+            *v1p = val_float(v1p->u.f + v2.u.f);
+        NEXT_CASE(INST_ASSIGN_ADDR_SUB)    ADDR_MATH_SHARED()
+            *v1p = val_float(v1p->u.f - v2.u.f);
+        NEXT_CASE(INST_ASSIGN_ADDR_MUL)    ADDR_MATH_SHARED()
+            *v1p = val_float(v1p->u.f * v2.u.f);
+        NEXT_CASE(INST_ASSIGN_ADDR_DIV)    ADDR_MATH_SHARED()
+            *v1p = val_float(v1p->u.f / v2.u.f);
+        
+        #define INDEX_SHARED(STR_VALID_OP)\
+            Value v2 = frame->stack[--frame->stackpos];\
+            Value v1 = frame->stack[--frame->stackpos];\
+            assert(v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY);\
+            if (v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY)\
+                assert(v2.tag == VALUE_FLOAT);\
+            if (v1.tag == VALUE_STRING)\
+                assert(((size_t)v2.u.f) STR_VALID_OP strlen(v1.u.s));
+    
+        NEXT_CASE(INST_INDEX)    INDEX_SHARED(<=)
+            if (v1.tag == VALUE_STRING)
+                v1.u.s = stringdupn(v1.u.s + (size_t)v2.u.f, 1);
             if (v1.tag == VALUE_ARRAY)
-                v1 = array_get(v1.u.a, v2.u.f);
+                v1 = *array_get(v1.u.a, v2.u.f);
             frame->stack[frame->stackpos++] = v1;
+        
+        NEXT_CASE(INST_INDEX_ADDR)    INDEX_SHARED(<)
+            if (v1.tag == VALUE_STRING)
+                frame->assign_target_char = v1.u.s + (size_t)v2.u.f;
+            if (v1.tag == VALUE_ARRAY)
+                frame->assign_target_agg = array_get(v1.u.a, v2.u.f);
+        
         END_CASE()
         DECAULT_CASE()
     CASES_END()
