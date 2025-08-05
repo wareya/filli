@@ -272,7 +272,10 @@ uint32_t prog_i = 0;
 
 void prog_write(uint16_t a) { program[prog_i++] = a; }
 void prog_add(size_t n) { for (size_t i = 0; i < n; i++) prog_write(0); }
+void prog_write2(uint16_t a, uint16_t b) { prog_write(a); prog_write(b); }
 void prog_write3(uint16_t a, uint16_t b, uint16_t c) { prog_write(a); prog_write(b); prog_write(c); }
+void prog_write5(uint16_t a, uint16_t b, uint16_t c, uint16_t d, uint16_t e)
+    { prog_write(a); prog_write(b); prog_write(c); prog_write(d); prog_write(e); }
 
 int tokenop_bindlevel(const char * source, Token * tokens, size_t count, size_t i)
 {
@@ -336,7 +339,6 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
     }
     else if (tokens[i].kind == 1)
     {
-        prog_write(PUSH_STRING);
         size_t l = tokens[i].len - 2;
         const char * sold = source + tokens[i].i + 1;
         char * s = stringdupn(sold, l);
@@ -352,17 +354,15 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
         }
         s[j] = 0;
         compiled_strings[compiled_string_i] = s;
-        prog_write(compiled_string_i++);
+        prog_write2(PUSH_STRING, compiled_string_i++);
     }
     else if (tokens[i].kind == 0)
     {
-        prog_write(PUSH_NUM);
-        
         char * s = stringdupn(source + tokens[i].i, tokens[i].len);
         double f = badstrtod(s);
         free(s);
         
-        prog_add(4);
+        prog_write5(PUSH_NUM, 0, 0, 0, 0);
         memcpy(program + (prog_i - 4), &f, 8);
     }
     
@@ -399,8 +399,7 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
         }
         if (!token_is(source, tokens, count, i++, "]")) return 0;
         
-        prog_write(INST_ARRAY_LITERAL);
-        prog_write(j);
+        prog_write2(INST_ARRAY_LITERAL, j);
         return i - orig_i;
     }
     return compile_value(source, tokens, count, i++);
@@ -447,8 +446,7 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
         }
         if (!token_is(source, tokens, count, i++, ")")) return 0;
         
-        prog_write(INST_FUNCCALL_EXPR);
-        prog_write(j);
+        prog_write2(INST_FUNCCALL_EXPR, j);
         return i - orig_i;
     }
     
@@ -494,9 +492,8 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
     {
         i += compile_expr(source, tokens, count, i + 1, 0) + 1;
         assert(token_is(source, tokens, count, i++, ":"));
-        prog_write(INST_JMP_IF_FALSE);
-        size_t jump_at = prog_i;
-        prog_add(2);
+        prog_write3(INST_JMP_IF_FALSE, 0, 0);
+        size_t jump_at = prog_i - 2;
         
         i += compile_statementlist(source, tokens, count, i);
         
@@ -509,17 +506,15 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         while (tokens[i].kind == -3 || tokens[i].kind == -2) // elif, else
         {
             // add on to previous block: skip this and the rest of the blocks
-            prog_write(INST_JMP);
-            skips[skip_i++] = prog_i;
-            prog_add(2);
+            prog_write3(INST_JMP, 0, 0);
+            skips[skip_i++] = prog_i - 2;
             
             if (tokens[i].kind == -3)
             {
                 i += compile_expr(source, tokens, count, i + 1, 0) + 1;
                 assert(token_is(source, tokens, count, i++, ":"));
-                prog_write(INST_JMP_IF_FALSE);
-                size_t jump_at = prog_i;
-                prog_add(2);
+                prog_write3(INST_JMP_IF_FALSE, 0, 0);
+                size_t jump_at = prog_i - 2;
                 
                 i += compile_statementlist(source, tokens, count, i);
                 
@@ -545,17 +540,15 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         size_t expr_i = i + 1;
         i += compile_expr(source, tokens, count, expr_i, 0) + 1;
         assert(token_is(source, tokens, count, i++, ":"));
-        prog_write(INST_JMP_IF_FALSE);
-        size_t skip_at = prog_i;
-        prog_add(2);
+        prog_write3(INST_JMP_IF_FALSE, 0, 0);
+        size_t skip_at = prog_i - 2;
         uint32_t loop_at = prog_i;
         
         i += compile_statementlist(source, tokens, count, i);
         assert(i < count);
         assert(tokens[i].kind == -12, "Missing end keyword"); // end
         compile_expr(source, tokens, count, expr_i, 0);
-        prog_write(INST_JMP_IF_TRUE);
-        prog_add(2);
+        prog_write3(INST_JMP_IF_TRUE, 0, 0);
         memcpy(program + (prog_i - 2), &loop_at, 4);
         
         uint32_t end = prog_i;
@@ -578,8 +571,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
             size_t r = compile_expr(source, tokens, count, i + 1, 0);
             if (!r) return i - orig_i;
             i += r + 1;
-            prog_write(INST_ASSIGN + in_global);
-            prog_write(id);
+            prog_write2(INST_ASSIGN + in_global, id);
         }
         return i - orig_i;
     }
@@ -600,8 +592,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         assert(ret > 0, "For loop requires valid expression")
         i += ret;
         
-        prog_write3(INST_FORSTART, id, idx);
-        prog_add(2);
+        prog_write5(INST_FORSTART, id, idx, 0, 0);
         
         uint32_t head = prog_i;
         
@@ -610,8 +601,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         i += compile_statementlist(source, tokens, count, i);
         assert(tokens[i++].kind == -12, "Missing end keyword");
         
-        prog_write3(INST_FOREND, id, idx);
-        prog_add(2);
+        prog_write5(INST_FOREND, id, idx, 0, 0);
         memcpy(program + (prog_i - 2), &head, 4);
         
         uint32_t end = prog_i;
@@ -641,13 +631,12 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         else if (globals_registered[id]) is_global = 1;
         else panic("Unknown variable");
         
-        if (strncmp(opstr, "=", oplen) == 0)       prog_write(INST_ASSIGN);
-        else if (strncmp(opstr, "+=", oplen) == 0) prog_write(INST_ASSIGN_ADD);
-        else if (strncmp(opstr, "-=", oplen) == 0) prog_write(INST_ASSIGN_SUB);
-        else if (strncmp(opstr, "*=", oplen) == 0) prog_write(INST_ASSIGN_MUL);
-        else if (strncmp(opstr, "/=", oplen) == 0) prog_write(INST_ASSIGN_DIV);
+        if (strncmp(opstr, "=", oplen) == 0)       prog_write(INST_ASSIGN + is_global);
+        else if (strncmp(opstr, "+=", oplen) == 0) prog_write(INST_ASSIGN_ADD + is_global);
+        else if (strncmp(opstr, "-=", oplen) == 0) prog_write(INST_ASSIGN_SUB + is_global);
+        else if (strncmp(opstr, "*=", oplen) == 0) prog_write(INST_ASSIGN_MUL + is_global);
+        else if (strncmp(opstr, "/=", oplen) == 0) prog_write(INST_ASSIGN_DIV + is_global);
         
-        if (is_global) program[prog_i - 1] += 1;
         prog_write(id);
         return i - orig_i;
     }
@@ -765,9 +754,8 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
     }
     if (!token_is(source, tokens, count, i++, ":")) return 0;
     
-    prog_write(INST_FUNCDEF);
-    size_t len_offs = prog_i;
-    prog_add(2);
+    prog_write3(INST_FUNCDEF, 0, 0);
+    size_t len_offs = prog_i - 2;
     
     funcs_registered[id].exists = 1;
     funcs_registered[id].argcount = j;
