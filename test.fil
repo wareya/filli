@@ -60,6 +60,3 @@ print(string)
 string[6] = "_"
 print(string)
 
-for n in 100:
-    break
-end

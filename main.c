@@ -22,6 +22,7 @@ int main(int argc, char ** argv)
 #ifdef USE_GC
     GC_INIT();
 #endif
+    init_program();
     lex_init();
     register_intrinsic_funcs();
     

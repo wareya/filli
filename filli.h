@@ -265,8 +265,14 @@ enum {
 };
 
 // FIXME: make non-global
-uint16_t program[PROGRAM_MAXLEN];
+uint16_t * program = 0;
+uint32_t prog_capacity = PROGRAM_MAXLEN;
+void init_program() { program = malloc(sizeof(uint16_t) * prog_capacity); }
 uint32_t prog_i = 0;
+
+void prog_write(uint16_t a) { program[prog_i++] = a; }
+void prog_add(size_t n) { for (size_t i = 0; i < n; i++) prog_write(0); }
+void prog_write3(uint16_t a, uint16_t b, uint16_t c) { prog_write(a); prog_write(b); prog_write(c); }
 
 int tokenop_bindlevel(const char * source, Token * tokens, size_t count, size_t i)
 {
@@ -315,22 +321,22 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
     if (tokens[i].kind < 0)
     {
         if (!in_global && locals_registered[lex_ident_offset-tokens[i].kind])
-            program[prog_i++] = PUSH_LOCAL;
+            prog_write(PUSH_LOCAL);
         else if (globals_registered[lex_ident_offset-tokens[i].kind])
-            program[prog_i++] = PUSH_GLOBAL;
+            prog_write(PUSH_GLOBAL);
         else if (funcs_registered[lex_ident_offset-tokens[i].kind].exists)
-            program[prog_i++] = PUSH_FUNCNAME;
+            prog_write(PUSH_FUNCNAME);
         else
         {
             printsn(source + tokens[i].i, tokens[i].len);
             prints("\n");
             panic("Unknown identifier");
         }
-        program[prog_i++] = lex_ident_offset - tokens[i].kind;
+        prog_write(lex_ident_offset - tokens[i].kind);
     }
     else if (tokens[i].kind == 1)
     {
-        program[prog_i++] = PUSH_STRING;
+        prog_write(PUSH_STRING);
         size_t l = tokens[i].len - 2;
         const char * sold = source + tokens[i].i + 1;
         char * s = stringdupn(sold, l);
@@ -346,18 +352,18 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
         }
         s[j] = 0;
         compiled_strings[compiled_string_i] = s;
-        program[prog_i++] = compiled_string_i++;
+        prog_write(compiled_string_i++);
     }
     else if (tokens[i].kind == 0)
     {
-        program[prog_i++] = PUSH_NUM;
+        prog_write(PUSH_NUM);
         
         char * s = stringdupn(source + tokens[i].i, tokens[i].len);
         double f = badstrtod(s);
         free(s);
         
-        memcpy(program + prog_i, &f, 8);
-        prog_i += 4;
+        prog_add(4);
+        memcpy(program + (prog_i - 4), &f, 8);
     }
     
     return 1;
@@ -393,8 +399,8 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
         }
         if (!token_is(source, tokens, count, i++, "]")) return 0;
         
-        program[prog_i++] = INST_ARRAY_LITERAL;
-        program[prog_i++] = j;
+        prog_write(INST_ARRAY_LITERAL);
+        prog_write(j);
         return i - orig_i;
     }
     return compile_value(source, tokens, count, i++);
@@ -441,8 +447,8 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
         }
         if (!token_is(source, tokens, count, i++, ")")) return 0;
         
-        program[prog_i++] = INST_FUNCCALL_EXPR;
-        program[prog_i++] = j;
+        prog_write(INST_FUNCCALL_EXPR);
+        prog_write(j);
         return i - orig_i;
     }
     
@@ -467,13 +473,10 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
         assert(token_is(source, tokens, count, i++, "]"));
     }
     else { printsn(source + tokens[i].i, tokens[i].len); prints("\n"); panic("Unknown infix operator"); }
-    program[prog_i++] = inst;
+    prog_write(inst);
     return r + 1;
 }
 
-
-void inst_push3(uint16_t a, uint16_t b, uint16_t c)
-    { program[prog_i++] = a; program[prog_i++] = b; program[prog_i++] = c; }
 
 size_t compile_statementlist(const char * source, Token * tokens, size_t count, size_t i);
 
@@ -491,9 +494,9 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
     {
         i += compile_expr(source, tokens, count, i + 1, 0) + 1;
         assert(token_is(source, tokens, count, i++, ":"));
-        program[prog_i++] = INST_JMP_IF_FALSE;
+        prog_write(INST_JMP_IF_FALSE);
         size_t jump_at = prog_i;
-        prog_i += 2;
+        prog_add(2);
         
         i += compile_statementlist(source, tokens, count, i);
         
@@ -506,17 +509,17 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         while (tokens[i].kind == -3 || tokens[i].kind == -2) // elif, else
         {
             // add on to previous block: skip this and the rest of the blocks
-            program[prog_i++] = INST_JMP;
+            prog_write(INST_JMP);
             skips[skip_i++] = prog_i;
-            prog_i += 2;
+            prog_add(2);
             
             if (tokens[i].kind == -3)
             {
                 i += compile_expr(source, tokens, count, i + 1, 0) + 1;
                 assert(token_is(source, tokens, count, i++, ":"));
-                program[prog_i++] = INST_JMP_IF_FALSE;
+                prog_write(INST_JMP_IF_FALSE);
                 size_t jump_at = prog_i;
-                prog_i += 2;
+                prog_add(2);
                 
                 i += compile_statementlist(source, tokens, count, i);
                 
@@ -542,17 +545,17 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         size_t expr_i = i + 1;
         i += compile_expr(source, tokens, count, expr_i, 0) + 1;
         assert(token_is(source, tokens, count, i++, ":"));
-        program[prog_i++] = INST_JMP_IF_FALSE;
+        prog_write(INST_JMP_IF_FALSE);
         size_t skip_at = prog_i;
-        prog_i += 2;
+        prog_add(2);
         uint32_t loop_at = prog_i;
         
         i += compile_statementlist(source, tokens, count, i);
         assert(i < count);
         assert(tokens[i].kind == -12, "Missing end keyword"); // end
         compile_expr(source, tokens, count, expr_i, 0);
-        program[prog_i++] = INST_JMP_IF_TRUE;
-        prog_i += 2;
+        prog_write(INST_JMP_IF_TRUE);
+        prog_add(2);
         memcpy(program + (prog_i - 2), &loop_at, 4);
         
         uint32_t end = prog_i;
@@ -575,8 +578,8 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
             size_t r = compile_expr(source, tokens, count, i + 1, 0);
             if (!r) return i - orig_i;
             i += r + 1;
-            program[prog_i++] = INST_ASSIGN + in_global;
-            program[prog_i++] = id;
+            prog_write(INST_ASSIGN + in_global);
+            prog_write(id);
         }
         return i - orig_i;
     }
@@ -597,8 +600,8 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         assert(ret > 0, "For loop requires valid expression")
         i += ret;
         
-        inst_push3(INST_FORSTART, id, idx);
-        prog_i += 2;
+        prog_write3(INST_FORSTART, id, idx);
+        prog_add(2);
         
         uint32_t head = prog_i;
         
@@ -607,8 +610,8 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         i += compile_statementlist(source, tokens, count, i);
         assert(tokens[i++].kind == -12, "Missing end keyword");
         
-        inst_push3(INST_FOREND, id, idx);
-        prog_i += 2;
+        prog_write3(INST_FOREND, id, idx);
+        prog_add(2);
         memcpy(program + (prog_i - 2), &head, 4);
         
         uint32_t end = prog_i;
@@ -638,14 +641,14 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         else if (globals_registered[id]) is_global = 1;
         else panic("Unknown variable");
         
-        if (strncmp(opstr, "=", oplen) == 0)       program[prog_i++] = INST_ASSIGN;
-        else if (strncmp(opstr, "+=", oplen) == 0) program[prog_i++] = INST_ASSIGN_ADD;
-        else if (strncmp(opstr, "-=", oplen) == 0) program[prog_i++] = INST_ASSIGN_SUB;
-        else if (strncmp(opstr, "*=", oplen) == 0) program[prog_i++] = INST_ASSIGN_MUL;
-        else if (strncmp(opstr, "/=", oplen) == 0) program[prog_i++] = INST_ASSIGN_DIV;
+        if (strncmp(opstr, "=", oplen) == 0)       prog_write(INST_ASSIGN);
+        else if (strncmp(opstr, "+=", oplen) == 0) prog_write(INST_ASSIGN_ADD);
+        else if (strncmp(opstr, "-=", oplen) == 0) prog_write(INST_ASSIGN_SUB);
+        else if (strncmp(opstr, "*=", oplen) == 0) prog_write(INST_ASSIGN_MUL);
+        else if (strncmp(opstr, "/=", oplen) == 0) prog_write(INST_ASSIGN_DIV);
         
         if (is_global) program[prog_i - 1] += 1;
-        program[prog_i++] = id;
+        prog_write(id);
         return i - orig_i;
     }
     else if (i + 2 < count && tokens[i].kind < -lex_ident_offset
@@ -669,9 +672,9 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         }
         if (!token_is(source, tokens, count, i++, ")")) return 0;
         
-        inst_push3(INST_FUNCCALL, id, j);
+        prog_write3(INST_FUNCCALL, id, j);
         
-        program[prog_i++] = INST_DISCARD;
+        prog_write(INST_DISCARD);
         return i - orig_i;
     }
     else if (tokens[i].kind == -12 || tokens[i].kind == -3 || tokens[i].kind == -2) // end, elif, else
@@ -691,8 +694,8 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
     else if (token_is(source, tokens, count, i, "return"))
     {
         size_t r = compile_expr(source, tokens, count, ++i, 0);
-        if (r == 0) program[prog_i++] = INST_RETURN_VOID;
-        else        program[prog_i++] = INST_RETURN_VAL;
+        if (r == 0) prog_write(INST_RETURN_VOID);
+        else        prog_write(INST_RETURN_VAL);
         return r + 1;
     }
     else
@@ -715,16 +718,16 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
             size_t old_i = i;
             uint32_t checkpoint = prog_i - 1;
             size_t r2 = compile_expr(source, tokens, count, i + 1, 0);
-            if (!r2) { program[prog_i++] = INST_DISCARD; return r; }
+            if (!r2) { prog_write(INST_DISCARD); return r; }
             r += r2 + 1;
             program[checkpoint] = INST_INDEX_ADDR;
-            if (token_is(source, tokens, count, old_i, "=")) program[prog_i++] = INST_ASSIGN_ADDR;
-            if (token_is(source, tokens, count, old_i, "+=")) program[prog_i++] = INST_ASSIGN_ADDR_ADD;
-            if (token_is(source, tokens, count, old_i, "-=")) program[prog_i++] = INST_ASSIGN_ADDR_SUB;
-            if (token_is(source, tokens, count, old_i, "*=")) program[prog_i++] = INST_ASSIGN_ADDR_MUL;
-            if (token_is(source, tokens, count, old_i, "/=")) program[prog_i++] = INST_ASSIGN_ADDR_DIV;
+            if (token_is(source, tokens, count, old_i, "=" )) prog_write(INST_ASSIGN_ADDR);
+            if (token_is(source, tokens, count, old_i, "+=")) prog_write(INST_ASSIGN_ADDR_ADD);
+            if (token_is(source, tokens, count, old_i, "-=")) prog_write(INST_ASSIGN_ADDR_SUB);
+            if (token_is(source, tokens, count, old_i, "*=")) prog_write(INST_ASSIGN_ADDR_MUL);
+            if (token_is(source, tokens, count, old_i, "/=")) prog_write(INST_ASSIGN_ADDR_DIV);
         }
-        else program[prog_i++] = INST_DISCARD;
+        else prog_write(INST_DISCARD);
         return r;
     }
 }
@@ -762,9 +765,9 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
     }
     if (!token_is(source, tokens, count, i++, ":")) return 0;
     
-    program[prog_i++] = INST_FUNCDEF;
+    prog_write(INST_FUNCDEF);
     size_t len_offs = prog_i;
-    prog_i += 2;
+    prog_add(2);
     
     funcs_registered[id].exists = 1;
     funcs_registered[id].argcount = j;
