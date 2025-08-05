@@ -25,7 +25,7 @@
 #define STRINGIZE(x) STRINGIZE2(x)
 #define LINE_STRING STRINGIZE(__LINE__)
 
-#define just_die() __builtin_abort()
+#define just_die() abort()
 #define die_now(X) { prints("Assert:\n" #X "\non " LINE_STRING " in " __FILE__ "\n"); fflush(stdout); just_die(); }
 #define assert(X, ...) { if (!(X)) { if (__VA_OPT__(1)+0) die_now(__VA_ARGS__) else die_now(X) } }
 #define perror(X) eprints(X)
@@ -68,11 +68,11 @@ double badstrtod(const char * s)
     return ret * sign;
 }
 
-const char * badftostr(double f)
+const char * baddtostr(double f)
 {
     if (f != f) return "nan";
-    if (f+f == f) return "inf";
-    if (f-f == f) return "-inf";
+    if (f != 0.0 && f+f == f) return "inf";
+    if (f != 0.0 && f-f == f) return "-inf";
     
     char buf[50] = {};
     size_t i = 0;
@@ -82,12 +82,13 @@ const char * badftostr(double f)
     if (pun & 0x8000000000000000) { buf[i++] = '-'; pun ^= 0x8000000000000000; }
     memcpy(&f, &pun, 8);
     
-    size_t mag = 0; while (f < 1000000000.0) { f *= 10.0; mag++; }
+    size_t mag = 0; while (f != 0.0 && f < 1000000000.0 / (i ? 10.0 : 1.0)) { f *= 10.0; mag++; }
     
     uint64_t fi2 = f;
     uint8_t d = i;
     while (fi2) { d++; fi2 /= 10; }
     if (d == i) d += 1;
+    if (f == 0.0) { mag = 9 - i; d = 10; }
     
     fi2 = f;
     for (size_t j = d; j > i;) { buf[--j] = '0' + (fi2 % 10); fi2 /= 10; }
@@ -257,9 +258,9 @@ Token * tokenize(const char * source, size_t * count)
 enum {
     INST_INVALID,
     // zero-op
-    INST_EQ = 0x100,
+    INST_INDEX = 0x100,
     INST_ADD, INST_SUB, INST_MUL, INST_DIV,
-    INST_INDEX,
+    INST_CMP_EQ, INST_CMP_NE, INST_CMP_GT, INST_CMP_LT, INST_CMP_GE, INST_CMP_LE,
     // 1-op
     PUSH_FUNCNAME = 0x210,
     PUSH_STRING, // table index
@@ -472,7 +473,12 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
     else if (token_is(source, tokens, count, i, "/")) inst = INST_DIV;
     else if (token_is(source, tokens, count, i, "+")) inst = INST_ADD;
     else if (token_is(source, tokens, count, i, "*")) inst = INST_MUL;
-    else if (token_is(source, tokens, count, i, "==")) inst = INST_EQ;
+    else if (token_is(source, tokens, count, i, "==")) inst = INST_CMP_EQ;
+    else if (token_is(source, tokens, count, i, "!=")) inst = INST_CMP_NE;
+    else if (token_is(source, tokens, count, i, ">=")) inst = INST_CMP_GE;
+    else if (token_is(source, tokens, count, i, "<=")) inst = INST_CMP_LE;
+    else if (token_is(source, tokens, count, i, ">")) inst = INST_CMP_GT;
+    else if (token_is(source, tokens, count, i, "<")) inst = INST_CMP_LT;
     else if (token_is(source, tokens, count, i, "["))
     {
         inst = INST_INDEX;
@@ -760,7 +766,7 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
         {
             int tag = frame->stack[frame->stackpos - 1 - i].tag;
             if (tag == VALUE_FLOAT)
-                prints(badftostr(frame->stack[frame->stackpos - 1 - i].u.f));
+                prints(baddtostr(frame->stack[frame->stackpos - 1 - i].u.f));
             else if (tag == VALUE_STRING)
                 prints(frame->stack[frame->stackpos - 1 - i].u.s);
             else if (tag == VALUE_ARRAY)
@@ -850,13 +856,13 @@ void interpret(void)
             Value v1 = global_frame->vars[id];\
             assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
             
-        NEXT_CASE(INST_ASSIGN_GLOBAL_ADD)   GLOBAL_MATH_SHARED()
+        NEXT_CASE(INST_ASSIGN_GLOBAL_ADD)    GLOBAL_MATH_SHARED()
             global_frame->vars[id] = val_float(v1.u.f + v2.u.f);
-        NEXT_CASE(INST_ASSIGN_GLOBAL_SUB)   GLOBAL_MATH_SHARED()
+        NEXT_CASE(INST_ASSIGN_GLOBAL_SUB)    GLOBAL_MATH_SHARED()
             global_frame->vars[id] = val_float(v1.u.f - v2.u.f);
-        NEXT_CASE(INST_ASSIGN_GLOBAL_MUL)   GLOBAL_MATH_SHARED()
+        NEXT_CASE(INST_ASSIGN_GLOBAL_MUL)    GLOBAL_MATH_SHARED()
             global_frame->vars[id] = val_float(v1.u.f * v2.u.f);
-        NEXT_CASE(INST_ASSIGN_GLOBAL_DIV)   GLOBAL_MATH_SHARED()
+        NEXT_CASE(INST_ASSIGN_GLOBAL_DIV)    GLOBAL_MATH_SHARED()
             global_frame->vars[id] = val_float(v1.u.f / v2.u.f);
         
         #define MATH_SHARED()\
@@ -864,15 +870,42 @@ void interpret(void)
             Value v1 = frame->stack[--frame->stackpos];\
             assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
         
-        NEXT_CASE(INST_ADD)   MATH_SHARED()
+        NEXT_CASE(INST_ADD)    MATH_SHARED()
             frame->stack[frame->stackpos++] = val_float(v1.u.f + v2.u.f);
-        NEXT_CASE(INST_SUB)   MATH_SHARED()
+        NEXT_CASE(INST_SUB)    MATH_SHARED()
             frame->stack[frame->stackpos++] = val_float(v1.u.f - v2.u.f);
-        NEXT_CASE(INST_MUL)   MATH_SHARED()
+        NEXT_CASE(INST_MUL)    MATH_SHARED()
             frame->stack[frame->stackpos++] = val_float(v1.u.f * v2.u.f);
-        NEXT_CASE(INST_DIV)   MATH_SHARED()
+        NEXT_CASE(INST_DIV)    MATH_SHARED()
             frame->stack[frame->stackpos++] = val_float(v1.u.f / v2.u.f);
         
+        #define EQ_SHARED()\
+            Value v2 = frame->stack[--frame->stackpos];\
+            Value v1 = frame->stack[--frame->stackpos];\
+            int8_t equality = 0;\
+            if (v2.tag != v1.tag) equality = 1;\
+            else if (v1.tag == VALUE_FLOAT && (v1.u.f != v1.u.f || v2.u.f != v2.u.f)) equality = 1;\
+            else if (v1.tag == VALUE_FLOAT && v1.u.f > v2.u.f) equality = -1;\
+            else if (v1.tag == VALUE_FLOAT && v1.u.f < v2.u.f) equality = -2;\
+            else if (v1.tag == VALUE_FLOAT && v1.u.f == v2.u.f) equality = 0;\
+            else if (v1.tag == VALUE_STRING) equality = strcmp(v1.u.s, v2.u.s);\
+            else if (v1.tag == VALUE_ARRAY) equality = v1.u.a != v2.u.a;
+            // 0: equal, 1: neq (unordered). -2: lt. -1: gt.
+        
+        NEXT_CASE(INST_CMP_EQ)    EQ_SHARED()
+            frame->stack[frame->stackpos++] = val_float(equality == 0);
+        NEXT_CASE(INST_CMP_NE)    EQ_SHARED()
+            frame->stack[frame->stackpos++] = val_float(equality != 0);
+        NEXT_CASE(INST_CMP_GE)    EQ_SHARED()
+            frame->stack[frame->stackpos++] = val_float(equality == 0 || equality == -1);
+        NEXT_CASE(INST_CMP_LE)    EQ_SHARED()
+            frame->stack[frame->stackpos++] = val_float(equality == 0 || equality == -2);
+        NEXT_CASE(INST_CMP_GT)    EQ_SHARED()
+            frame->stack[frame->stackpos++] = val_float(equality == -1);
+        NEXT_CASE(INST_CMP_LT)    EQ_SHARED()
+            frame->stack[frame->stackpos++] = val_float(equality == -2);
+            
+            
         NEXT_CASE(INST_FORSTART)
             Value v = frame->stack[--frame->stackpos];
             assert(v.tag == VALUE_FLOAT, "For loops can only operate on numbers");
@@ -881,14 +914,14 @@ void interpret(void)
             frame->forloops[idx] = v.u.f;
             double temp = v.u.f;
             assert(temp - 1.0 != temp, "For loop value is too large and will never terminate");
-            frame->vars[id] = val_float(0.0f);
+            frame->vars[id] = val_float(0.0);
         NEXT_CASE(INST_FOREND)
             uint16_t id = program[frame->pc + 1];
             assert(frame->vars[id].tag == VALUE_FLOAT, "For loops can only operate on numbers");
             uint16_t idx = program[frame->pc + 2];
             uint32_t target;
             memcpy(&target, program + (frame->pc + 3), 4);
-            frame->vars[id].u.f += 1.0f;
+            frame->vars[id].u.f += 1.0;
             if (frame->vars[id].u.f < frame->forloops[idx])
             {
                 frame->pc = target;
@@ -901,8 +934,6 @@ void interpret(void)
             char * s = stringdup(compiled_strings[id]);
             frame->stack[frame->stackpos++] = val_string(s);
         NEXT_CASE(INST_IF)
-            panic("TODO");
-        NEXT_CASE(INST_EQ)
             panic("TODO");
         NEXT_CASE(PUSH_LOCAL)
             panic("TODO");
