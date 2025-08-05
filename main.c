@@ -258,8 +258,8 @@ Token * tokenize(const char * source, size_t * count)
 enum {
     INST_INVALID,
     // zero-op
-    INST_RETURN_VAL = 0x100,
-    INST_RETURN_VOID,
+    INST_DISCARD = 0x100,
+    INST_RETURN_VAL, INST_RETURN_VOID,
     INST_ADD, INST_SUB, INST_MUL, INST_DIV,
     INST_CMP_EQ, INST_CMP_NE, INST_CMP_GT, INST_CMP_LT, INST_CMP_GE, INST_CMP_LE,
     INST_INDEX,
@@ -626,10 +626,11 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         return i - orig_i;
     }
     else if (i + 2 < count && tokens[i].kind < -lex_ident_offset
-             && token_is(source, tokens, count, i+1, "("))
+             && token_is(source, tokens, count, i+1, "(")
+             && funcs_registered[lex_ident_offset - tokens[i].kind].exists)
     {
-        int16_t id = lex_ident_offset - tokens[i++].kind;
-        if (!funcs_registered[id].exists) return 0;
+        uint16_t id = lex_ident_offset - tokens[i].kind;
+        i += 1; // func name
         i += 1; // (
         
         uint16_t j = 0;
@@ -649,6 +650,8 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         program[prog_i++] = INST_FUNCCALL;
         program[prog_i++] = id;
         program[prog_i++] = j;
+        
+        program[prog_i++] = INST_DISCARD;
         return i - orig_i;
     }
     else if (tokens[i].kind == -12) // end
@@ -665,10 +668,16 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
     }
     else
     {
-        prints("AT: ");
-        printsn(source + tokens[i].i, tokens[i].len);
-        prints("\n");
-        panic("TODO");
+        size_t r = compile_expr(source, tokens, count, i, 0);
+        if (r == 0)
+        {
+            prints("AT: ");
+            printsn(source + tokens[i].i, tokens[i].len);
+            prints("\n");
+            panic("TODO");
+        }
+        program[prog_i++] = INST_DISCARD;
+        return r;
     }
     panic();
 }
@@ -841,6 +850,9 @@ void interpret(void)
         
         MARK_CASE(INST_INVALID)
             return;
+        
+        NEXT_CASE(INST_DISCARD)
+            --frame->stackpos;
         NEXT_CASE(INST_FUNCDEF)
             uint32_t target;
             memcpy(&target, program + (frame->pc + 1), 4);
@@ -1004,12 +1016,13 @@ void interpret(void)
             }
         NEXT_CASE(INST_JMP)
             panic("TODO");
+        NEXT_CASE(INST_IF)
+            panic("TODO");
+        
         NEXT_CASE(PUSH_STRING)
             uint16_t id = program[frame->pc + 1];
             char * s = stringdup(compiled_strings[id]);
             frame->stack[frame->stackpos++] = val_string(s);
-        NEXT_CASE(INST_IF)
-            panic("TODO");
         NEXT_CASE(PUSH_LOCAL)
             uint16_t id = program[frame->pc + 1];
             frame->stack[frame->stackpos++] = frame->vars[id];
