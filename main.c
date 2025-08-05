@@ -3,8 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// TODO: "continue" and "break"
-
 #define USE_GC
 
 #ifdef USE_GC
