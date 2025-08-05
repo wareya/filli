@@ -48,7 +48,7 @@ void printu16hex(uint16_t x)
     char s[5] = { c[(x>>12)&15], c[(x>>8)&15], c[(x>>4)&15], c[x&15], 0 };
     prints(s);
 }
-void printsn(const char * s, size_t len) { prints(stringdupn(s, len)); }
+void printsn(const char * s, size_t len) { char * s2 = stringdupn(s, len); prints(s2); free(s2); }
 
 double badstrtod(const char * s)
 {
@@ -100,10 +100,7 @@ const char * baddtostr(double f)
 
 // actual program
 
-typedef struct _IdEntry {
-    const char * where;
-    uint16_t len;
-} IdEntry;
+typedef struct _IdEntry { const char * where; uint16_t len; } IdEntry;
 
 int16_t highest_ident_id = 0;
 int16_t insert_or_lookup_id(const char * text, uint16_t len)
@@ -125,11 +122,9 @@ int16_t insert_or_lookup_id(const char * text, uint16_t len)
     panic("Out of IDs");
 }
 
-typedef struct _Token {
-    uint32_t i;
-    uint16_t len;
-    int16_t kind; // negative: identifier. zero: number. one: string. two: punctuation. three: newline (if enabled).
-} Token;
+typedef struct _Token { uint32_t i; uint16_t len; int16_t kind; } Token;
+// key to kind:
+// negative: identifier. zero: number. one: string. two: punctuation. three: newline (if enabled).
 
 int token_is(const char * source, Token * tokens, size_t count, size_t i, const char * text)
 {
@@ -167,16 +162,13 @@ void lex_init(void)
 }
 #define MIN_KEYWORD -13
 
-Token * tokenize(const char * source, size_t * count)
+Token * tokenize(const char * src, size_t * count)
 {
     int newline_is_token = 1;
     
-    const char * long_punctuation[] = {
-        "==", "!=", ">=", "<=", "->",
-        "+=", "-=", "*=", "/="
-    };
+    const char * long_punctuation[] = { "==", "!=", ">=", "<=", "+=", "-=", "*=", "/=" };
     
-    size_t len = strlen(source);
+    size_t len = strlen(src);
     
     Token * ret = (Token *)malloc(sizeof(Token) * len);
     size_t t = 0;
@@ -184,76 +176,66 @@ Token * tokenize(const char * source, size_t * count)
     for (size_t i = 0; i < len; )
     {
         // skip comments and whitespace
-        if (source[i] == '#') { while (source[i] != 0 && source[i] != '\n') { i++; } continue; }
+        if (src[i] == '#') { while (src[i] != '\0' && src[i] != '\n') { i++; } continue; }
+        if (src[i] == ' ' || src[i] == '\t' || src[i] == '\r') { i++; continue; }
         
-        if (source[i] == ' ' || source[i] == '\t' || source[i] == '\r') { i++; continue; }
-        
-        if (source[i] == '\n')
+        if (src[i] == '\n')
         {
-            if (newline_is_token && t > 0 && token_is(source, ret, t, t-1, "\\"))
+            if (newline_is_token && t > 0 && token_is(src, ret, t, t-1, "\\"))
                 t -= 1;
             else if (newline_is_token)
-                ret[t++] = mk_token(i++, 1, 3);
-            else
-                i++;
-            continue;
+                ret[t++] = mk_token(i, 1, 3);
+            i++;
         }
-        
         // tokenize numbers
-        if ((source[i] >= '0' && source[i] <= '9')
-            || (source[i] == '-' && source[i+1] >= '0' && source[i+1] <= '9'))
+        else if ((src[i] >= '0' && src[i] <= '9') || (src[i] == '-' && src[i+1] >= '0' && src[i+1] <= '9'))
         {
-            int dot_ok = 1;
+            uint8_t dot_ok = 1;
             size_t start_i = i;
-            if (source[i] == '-') i += 1;
-            while ((source[i] >= '0' && source[i] <= '9') || (dot_ok && source[i] == '.'))
-                dot_ok &= !(source[i++] == '.');
+            if (src[i] == '-') i += 1;
+            while ((src[i] >= '0' && src[i] <= '9') || (dot_ok && src[i] == '.'))
+                dot_ok = (src[i++] == '.') ? 0 : dot_ok;
             ret[t++] = mk_token(start_i, i-start_i, 0);
-            continue;
         }
         // tokenize identifiers and keywords
-        if ((source[i] >= 'a' && source[i] <= 'z') || (source[i] >= 'A' && source[i] <= 'Z') || source[i] == '_')
-        {
-            size_t start_i = i;
-            i++;
-            while ((source[i] >= 'a' && source[i] <= 'z') || (source[i] >= 'A' && source[i] <= 'Z')
-                   || source[i] == '_' || (source[i] >= '0' && source[i] <= '9'))
-                i++;
-            
-            ret[t++] = mk_token(start_i, i-start_i, insert_or_lookup_id(source + start_i, i - start_i));
-            continue;
-        }
-        // tokenize strings
-        if (source[i] == '\'' || source[i] == '"')
+        else if ((src[i] >= 'a' && src[i] <= 'z') || (src[i] >= 'A' && src[i] <= 'Z') || src[i] == '_')
         {
             size_t start_i = i++;
-            while (source[i] != source[start_i] && source[i] != 0)
-            {
-                if (source[i] == '\\') i += 2;
-                else i += 1;
-            }
-            if (source[i] != 0) i += 1;
-            ret[t++] = mk_token(start_i, i-start_i, 1);
-            continue;
+            while ((src[i] >= 'a' && src[i] <= 'z') || (src[i] >= 'A' && src[i] <= 'Z')
+                   || src[i] == '_' || (src[i] >= '0' && src[i] <= '9'))
+                i++;
+            
+            ret[t++] = mk_token(start_i, i-start_i, insert_or_lookup_id(src + start_i, i - start_i));
         }
-        // long punctuation
-        for (size_t j = 0; j < sizeof(long_punctuation) / sizeof(long_punctuation[0]); j++)
+        // tokenize strings
+        else if (src[i] == '\'' || src[i] == '"')
         {
-            size_t len = strlen(long_punctuation[j]);
-            if (strncmp(long_punctuation[j], source+i, len) == 0)
-            {
-                ret[t++] = mk_token(i, len, 2);
-                i += len;
-                goto fullcontinue;
-            }
+            size_t start_i = i++;
+            while (src[i] != src[start_i] && src[i] != 0) i += (src[i] == '\\') ? 2 : 1;
+            if (src[i] != 0) i += 1;
+            ret[t++] = mk_token(start_i, i-start_i, 1);
         }
-        // normal punctuation
-        ret[t++] = mk_token(i++, 1, 2);
-        fullcontinue: {}
+        else
+        {
+            // long punctuation
+            for (size_t j = 0; j < sizeof(long_punctuation) / sizeof(long_punctuation[0]); j++)
+            {
+                size_t len = strlen(long_punctuation[j]);
+                if (strncmp(long_punctuation[j], src+i, len) == 0)
+                {
+                    ret[t++] = mk_token(i, len, 2);
+                    i += len;
+                    goto fullcontinue;
+                }
+            }
+            // normal punctuation
+            ret[t++] = mk_token(i++, 1, 2);
+            
+            fullcontinue: {}
+        }
     }
     
     *count = t;
-    
     return ret;
 }
 
@@ -314,10 +296,7 @@ int tokenop_bindlevel(const char * source, Token * tokens, size_t count, size_t 
 }
 
 typedef struct _Funcdef {
-    uint8_t exists;
-    uint8_t intrinsic;
-    uint8_t argcount;
-    uint8_t id;
+    uint8_t exists; uint8_t intrinsic; uint8_t argcount; uint8_t id;
     uint32_t loc;
     uint16_t * args;
 } Funcdef;
@@ -349,7 +328,7 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
             program[prog_i++] = PUSH_FUNCNAME;
         else
         {
-            prints(stringdupn(source + tokens[i].i, tokens[i].len));
+            printsn(source + tokens[i].i, tokens[i].len);
             prints("\n");
             panic("Unknown identifier");
         }
@@ -399,7 +378,7 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
     if (token_is(source, tokens, count, i, "(")) // wrapped expr
     {
         size_t ret = compile_expr(source, tokens, count, i+1, 0) + 1;
-        if (!token_is(source, tokens, count, i + ret, ")")) panic("Unclosed parens");
+        assert(token_is(source, tokens, count, i + ret, ")"), "Unclosed parens");
         return ret + 1;
     }
     if (token_is(source, tokens, count, i, "[")) // array literal
@@ -461,8 +440,8 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
             assert(j++ < 256, "Too many arguments to function (limit is 256)");
             i += r;
             
-            if (!(token_is(source, tokens, count, i, ")")
-                || token_is(source, tokens, count, i, ","))) return 0;
+            if (!(token_is(source, tokens, count, i, ")") || token_is(source, tokens, count, i, ",")))
+                return 0;
             if (token_is(source, tokens, count, i, ",")) i++;
         }
         if (!token_is(source, tokens, count, i++, ")")) return 0;
@@ -492,7 +471,7 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
         i += ++r;
         assert(token_is(source, tokens, count, i++, "]"));
     }
-    else panic("TODO");
+    else { printsn(source + tokens[i].i, tokens[i].len); prints("\n"); panic("Unknown infix operator"); }
     program[prog_i++] = inst;
     return r + 1;
 }
@@ -523,11 +502,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         
         i += compile_statementlist(source, tokens, count, i);
         
-        uint32_t end;
-        if (tokens[i].kind == -3 || tokens[i].kind == -2)
-            end = prog_i + 3;
-        else
-            end = prog_i;
+        uint32_t end = prog_i + ((tokens[i].kind == -3 || tokens[i].kind == -2) ? 3 : 0);
         memcpy(program + jump_at, &end, 4);
         
         uint32_t skips[256] = {};
@@ -550,11 +525,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
                 
                 i += compile_statementlist(source, tokens, count, i);
                 
-                uint32_t end;
-                if (tokens[i].kind == -3 || tokens[i].kind == -2)
-                    end = prog_i + 3;
-                else
-                    end = prog_i;
+                uint32_t end = prog_i + ((tokens[i].kind == -3 || tokens[i].kind == -2) ? 3 : 0);
                 memcpy(program + jump_at, &end, 4);
             }
             else if (++i)
@@ -563,8 +534,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
                 i += compile_statementlist(source, tokens, count, i);
             }
         }
-        if (tokens[i].kind != -12) // end
-            panic("Missing end keyword");
+        assert(tokens[i].kind == -12, "Missing end keyword");
         uint32_t real_end = prog_i;
         while (skip_i > 0) memcpy(program + skips[--skip_i], &real_end, 4);
         i += 1;
@@ -584,18 +554,15 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         
         i += compile_statementlist(source, tokens, count, i);
         assert(i < count);
-        if (tokens[i].kind == -12) // end
-        {
-            compile_expr(source, tokens, count, expr_i, 0);
-            program[prog_i++] = INST_JMP_IF_TRUE;
-            prog_i += 2;
-            memcpy(program + (prog_i - 2), &loop_at, 4);
-            
-            uint32_t end = prog_i;
-            memcpy(program + skip_at, &end, 4);
-            i += 1;
-        }
-        else panic("Missing end keyword");
+        assert(tokens[i].kind == -12, "Missing end keyword"); // end
+        compile_expr(source, tokens, count, expr_i, 0);
+        program[prog_i++] = INST_JMP_IF_TRUE;
+        prog_i += 2;
+        memcpy(program + (prog_i - 2), &loop_at, 4);
+        
+        uint32_t end = prog_i;
+        memcpy(program + skip_at, &end, 4);
+        i += 1;
         
         loop_nesting--;
         return i - orig_i;
@@ -712,13 +679,11 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
     }
     else if (tokens[i].kind == -12 || tokens[i].kind == -3 || tokens[i].kind == -2) // end, elif, else
         return i - orig_i;
-    else if (token_is(source, tokens, count, i, "\n")
-             || token_is(source, tokens, count, i, ";"))
+    else if (token_is(source, tokens, count, i, "\n") || token_is(source, tokens, count, i, ";"))
         return 1;
     else if (token_is(source, tokens, count, i, "return"))
     {
-        i += 1;
-        size_t r = compile_expr(source, tokens, count, i, 0);
+        size_t r = compile_expr(source, tokens, count, ++i, 0);
         if (r == 0) program[prog_i++] = INST_RETURN_VOID;
         else        program[prog_i++] = INST_RETURN_VAL;
         return r + 1;
@@ -736,7 +701,6 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         program[prog_i++] = INST_DISCARD;
         return r;
     }
-    panic();
 }
 size_t compile_statementlist(const char * source, Token * tokens, size_t count, size_t i)
 {
@@ -804,10 +768,10 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
             r = compile_func(source, tokens, count, i+1);
             memset(locals_registered, 0, sizeof(locals_registered));
             in_global = 1;
-            if (r == 0) panic("Incomplete function");
+            assert(r != 0, "Incomplete function");
             i += r + 1;
             
-            if (tokens[i++].kind != -12) panic("Missing end keyword");
+            assert(tokens[i++].kind == -12, "Missing end keyword");
         }
         else if ((r = compile_statement(source, tokens, count, i)))
             i += r;
@@ -888,7 +852,7 @@ void print_op_and_panic(uint16_t op)
 void interpret(void)
 {
     Frame * frame = (Frame *)malloc(sizeof(Frame));
-    if (!frame) panic("Out of memory");
+    assert(frame, "Out of memory");
     
     Frame * global_frame = frame;
 
@@ -912,9 +876,7 @@ void interpret(void)
     CASES_START()
         
         MARK_CASE(INST_INVALID)    return;
-        
         NEXT_CASE(INST_DISCARD)    --frame->stackpos;
-        
         NEXT_CASE(INST_FUNCDEF)
             uint32_t target;
             memcpy(&target, program + (frame->pc + 1), 4);
@@ -928,8 +890,7 @@ void interpret(void)
             v.u.a->buf = (Value *)malloc(sizeof(Value) * itemcount);
             v.u.a->len = itemcount;
             v.u.a->cap = itemcount;
-            while (itemcount > 0)
-                v.u.a->buf[--itemcount] = frame->stack[--frame->stackpos];
+            while (itemcount > 0) v.u.a->buf[--itemcount] = frame->stack[--frame->stackpos];
             frame->stack[frame->stackpos++] = v;
         
         #define ENTER_FUNC()\
@@ -943,7 +904,7 @@ void interpret(void)
             {\
                 Frame * prev = frame;\
                 Frame * next = (Frame *)malloc(sizeof(Frame));\
-                if (!next) panic("Out of memory");\
+                assert(next, "Out of memory");\
                 PC_INC();\
                 next->return_to = frame;\
                 frame = next;\
@@ -1033,7 +994,7 @@ void interpret(void)
             else if (v1.tag == VALUE_FLOAT && v1.u.f == v2.u.f) equality = 0;\
             else if (v1.tag == VALUE_STRING) equality = strcmp(v1.u.s, v2.u.s);\
             else if (v1.tag == VALUE_ARRAY) equality = (v1.u.a != v2.u.a) * 2;
-            // 0: equal, 1: neq (unordered). -2: lt. -1: gt.
+            // 0: equal, 2: neq (unordered). -1: lt. 1: gt.
         
         NEXT_CASE(INST_CMP_EQ)    EQ_SHARED()
             frame->stack[frame->stackpos++] = val_float(equality == 0);
@@ -1109,12 +1070,13 @@ void interpret(void)
         NEXT_CASE(INST_ASSIGN_MUL)    LOCAL_MATH_SHARED()
             frame->vars[id] = val_float(v1.u.f * v2.u.f);
         NEXT_CASE(INST_ASSIGN_DIV)    LOCAL_MATH_SHARED()
-            frame->vars[id] = val_float(v1.u.f /     v2.u.f);
+            frame->vars[id] = val_float(v1.u.f / v2.u.f);
         
         NEXT_CASE(INST_INDEX)
             Value v2 = frame->stack[--frame->stackpos];
             Value v1 = frame->stack[--frame->stackpos];
-            assert(v1.tag != VALUE_FLOAT);
+            assert(v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY);
+            
             if (v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY)
                 assert(v2.tag == VALUE_FLOAT);
             if (v1.tag == VALUE_STRING)
