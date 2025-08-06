@@ -9,7 +9,7 @@ func calc(n):
     return sum
 end
 
-let sum = calc(10000000)
+let sum = calc(100000)
 
 print(sum * 4)
 print("Done!")
@@ -90,6 +90,7 @@ print(1 or 0)
 print(0 and 0)
 print(0 or 0)
 
-let f = lambda[]():
-    return 0
-end
+#let f = lambda[](): print("agioagwoiwge") end
+func f(): print("agioagwoiwge") end
+let _x = f()
+#print("x")

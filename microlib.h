@@ -48,7 +48,7 @@
 #define LINE_STRING STRINGIZE(__LINE__)
 
 #define just_die() abort()
-#define die_now(X) { prints("Assert:\n" #X "\non " LINE_STRING " in " __FILE__ "\n"); fflush(stdout); just_die(); }
+#define die_now(X) { prints("Assert:\n" #X "\nat " LINE_STRING " in " __FILE__ "\n"); fflush(stdout); just_die(); }
 #ifdef assert
     #undef assert
 #endif

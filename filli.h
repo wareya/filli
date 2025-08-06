@@ -180,8 +180,7 @@ enum {
     PUSH_NUM = 0x560, // f64
     INST_FOREND, // var id (2), for slot (2), destination (4)
     INST_FORSTART, // var id (2), for slot (2), destination(4) (needed if loop val is 0)
-    // self-handled
-    INST_LAMBDA = 0x700,
+    INST_LAMBDA, // func id (4), destination(4)
 };
 
 // TODO: make non-global
@@ -222,6 +221,8 @@ typedef struct _Funcdef {
     uint8_t exists; uint8_t intrinsic; uint8_t argcount; uint8_t id;
     uint32_t loc;
     uint16_t * args;
+    uint16_t cap_count;
+    uint16_t * caps;
 } Funcdef;
 
 const char * compiled_strings[1<<16] = {};
@@ -262,6 +263,8 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
             return prog_write(PUSH_NULL), 1;
         else if (func_depth > 0 && locals_registered[lex_ident_offset-tokens[i].kind])
             prog_write(PUSH_LOCAL);
+        else if (func_depth > 0 && caps_registered[lex_ident_offset-tokens[i].kind])
+            prog_write(PUSH_CAP);
         else if (globals_registered[lex_ident_offset-tokens[i].kind])
             prog_write(PUSH_GLOBAL);
         else if (funcs_registered[lex_ident_offset-tokens[i].kind].exists)
@@ -616,16 +619,17 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         assert(ret > 0, "Assignment requires valid expression")
         i += ret;
         
-        uint8_t is_global;
-        if (func_depth > 0 && locals_registered[id]) is_global = 0;
-        else if (globals_registered[id]) is_global = 1;
+        uint8_t mode;
+        if (func_depth > 0 && locals_registered[id]) mode = 0;
+        else if (func_depth > 0 && caps_registered[id]) mode = 2;
+        else if (globals_registered[id]) mode = 1;
         else panic("Unknown variable");
         
-        if (strncmp(opstr, "=", oplen) == 0)       prog_write(INST_SET + is_global);
-        else if (strncmp(opstr, "+=", oplen) == 0) prog_write(INST_SET_ADD + is_global);
-        else if (strncmp(opstr, "-=", oplen) == 0) prog_write(INST_SET_SUB + is_global);
-        else if (strncmp(opstr, "*=", oplen) == 0) prog_write(INST_SET_MUL + is_global);
-        else if (strncmp(opstr, "/=", oplen) == 0) prog_write(INST_SET_DIV + is_global);
+        if (strncmp(opstr, "=", oplen) == 0)       prog_write(INST_SET + mode);
+        else if (strncmp(opstr, "+=", oplen) == 0) prog_write(INST_SET_ADD + mode);
+        else if (strncmp(opstr, "-=", oplen) == 0) prog_write(INST_SET_SUB + mode);
+        else if (strncmp(opstr, "*=", oplen) == 0) prog_write(INST_SET_MUL + mode);
+        else if (strncmp(opstr, "/=", oplen) == 0) prog_write(INST_SET_DIV + mode);
         
         prog_write(id);
         return i - orig_i;
@@ -733,7 +737,7 @@ size_t compile_register_func(const char * source, Token * tokens, size_t count, 
     )
     if (!token_is(source, tokens, count, i++, ":")) panic("Invalid funcdef");
     
-    funcs_registered[id] = (Funcdef) {1, 0, j, id, prog_i, 0};
+    funcs_registered[id] = (Funcdef) {1, 0, j, id, prog_i, 0, 0, 0};
     if (j > 0)
     {
         funcs_registered[id].args = (uint16_t *)malloc(sizeof(uint16_t)*j);
@@ -766,17 +770,20 @@ size_t compile_lambda(const char * source, Token * tokens, size_t count, size_t 
     size_t orig_i = i;
     if (i >= count) return 0;
     
-    prog_write5(INST_LAMBDA, 0, 0, 0, 0);
-    size_t id_offs = prog_i - 4;
+    prog_write3(INST_LAMBDA, 0, 0);
+    size_t id_offs = prog_i - 2;
     
-    prog_write(caps_count);
-    for (size_t j = 0; j < caps_count; j++) prog_write(caps[j]);
+    prog_write2(0, 0);
+    size_t target_offs = prog_i - 2;
     
     uint32_t id = lambda_id++;
     i += compile_register_func(source, tokens, count, id, i);
-    
     memcpy(program + id_offs, &id, 4);
-    memcpy(program + id_offs + 2, &prog_i, 4);
+    
+    funcs_registered[id].caps = caps;
+    funcs_registered[id].cap_count = caps_count;
+    
+    memcpy(program + target_offs, &prog_i, 4);
     
     return i - orig_i;
 }
@@ -832,6 +839,8 @@ Value * array_get(Array * a, size_t i) { assert(i < a->len); return a->buf + i; 
 // used by hashmap, not comparisons
 uint8_t val_eq(Value * a, Value * b)
 {
+    printf("%p\n", a);
+    printf("%p\n", b);
     if (a->tag != b->tag) return 0;
     if (a->tag == VALUE_FLOAT) return a->u.f == b->u.f || (a->u.f != a->u.f && b->u.f != b->u.f);
     if (a->tag == VALUE_STRING) return strcmp(a->u.s, b->u.s) == 0;
@@ -860,7 +869,7 @@ void dict_reallocate(Dict * d, size_t newcap)
     size_t mask = newcap - 1;
     BiValue * newbuf = malloc(sizeof(BiValue) * newcap);
     memset(newbuf, 0, sizeof(BiValue) * newcap);
-    for (size_t i = 0; i < d->len; i++)
+    for (size_t i = 0; i < d->cap; i++)
     {
         Value * l = &d->buf[i].l;
         Value * r = &d->buf[i].r;
@@ -908,15 +917,10 @@ typedef struct _Frame {
     Value vars[FRAME_VARCOUNT];
     Value stack[FRAME_STACKSIZE];
     double forloops[FORLOOP_COUNT_LIMIT];
+    Value * captures[CAPTURELIMIT];
 } Frame;
 
-void print_op_and_panic(uint16_t op)
-{
-    prints("---\n");
-    printu16hex(op);
-    prints("\n---\n");
-    panic("TODO");
-}
+void print_op_and_panic(uint16_t op) { prints("---\n"); printu16hex(op); prints("\n---\n"); panic("TODO"); }
 
 void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame);
 
@@ -928,7 +932,7 @@ void interpret(void)
     Frame * global_frame = frame;
 
     #define CASES_START() \
-    while (1) {\
+    while (frame->pc < prog_i) {\
         uint16_t op = program[frame->pc];\
         switch (op) {
     #define CASES_END() } }
@@ -977,6 +981,7 @@ void interpret(void)
             {\
                 Frame * prev = frame;\
                 Frame * next = (Frame *)malloc(sizeof(Frame));\
+                memset(next, 0, sizeof(Frame));\
                 assert(next, "Out of memory");\
                 PC_INC();\
                 next->return_to = frame;\
@@ -1022,6 +1027,7 @@ void interpret(void)
             memset(&frame->stack[frame->stackpos], 0, sizeof(Value));
             Value v = val_tagged(VALUE_DICT);
             v.u.d = (Dict *)malloc(sizeof(Dict));
+            memset(v.u.d, 0, sizeof(Dict));
             STACK_PUSH(v)
         
         NEXT_CASE(PUSH_NUM)
@@ -1181,7 +1187,9 @@ void interpret(void)
             if (v1.tag == VALUE_DICT)   frame->assign_target_agg = dict_get_or_insert(v1.u.d, &v2);
         
         NEXT_CASE(INST_LAMBDA)
-            panic("TODO lambdas")
+            uint16_t id = program[frame->pc + 1];
+            STACK_PUSH(val_func(id))
+            READ_AND_GOTO_TARGET(3)
         
         END_CASE()
         DECAULT_CASE()
