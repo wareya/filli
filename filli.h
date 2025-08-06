@@ -32,10 +32,8 @@ int16_t insert_or_lookup_id(const char * text, uint16_t len)
     static IdEntry ids[IDENTIFIER_COUNT] = {};
     for (int16_t j = 1; j <= IDENTIFIER_COUNT; j++)
     {
-        if (ids[j].len == 0)
-            ids[j] = (IdEntry) { stringdupn(text, len), len };
-        if (ids[j].len == len && strncmp(ids[j].where, text, len) == 0)
-            return -j;
+        if (ids[j].len == 0) ids[j] = (IdEntry) { stringdupn(text, len), len };
+        if (ids[j].len == len && strncmp(ids[j].where, text, len) == 0) return -j;
     }
     panic("Out of IDs");
 }
@@ -164,13 +162,16 @@ enum {
     INST_RETURN_VAL, INST_RETURN_VOID,
     INST_ADD, INST_SUB, INST_MUL, INST_DIV, INST_CMP_AND, INST_CMP_OR,
     INST_CMP_EQ, INST_CMP_NE, INST_CMP_GT, INST_CMP_LT, INST_CMP_GE, INST_CMP_LE,
-    INST_INDEX, INST_INDEX_ADDR, INST_ASSIGN_ADDR,
-    INST_ASSIGN_ADDR_ADD, INST_ASSIGN_ADDR_SUB, INST_ASSIGN_ADDR_MUL, INST_ASSIGN_ADDR_DIV,
+    INST_INDEX, INST_INDEX_ADDR, INST_SET_ADDR,
+    INST_SET_ADDR_ADD, INST_SET_ADDR_SUB, INST_SET_ADDR_MUL, INST_SET_ADDR_DIV,
     // 1-op
     PUSH_FUNCNAME = 0x220, PUSH_STRING, // id // table index
-    PUSH_LOCAL, PUSH_GLOBAL, INST_ASSIGN, INST_ASSIGN_GLOBAL,
-    INST_ASSIGN_ADD, INST_ASSIGN_GLOBAL_ADD, INST_ASSIGN_SUB, INST_ASSIGN_GLOBAL_SUB,
-    INST_ASSIGN_MUL, INST_ASSIGN_GLOBAL_MUL, INST_ASSIGN_DIV, INST_ASSIGN_GLOBAL_DIV,
+    PUSH_LOCAL, PUSH_GLOBAL, PUSH_CAP,
+    INST_SET, INST_SET_GLOBAL, INST_SET_CAP,
+    INST_SET_ADD, INST_SET_GLOBAL_ADD, INST_SET_CAP_ADD,
+    INST_SET_SUB, INST_SET_GLOBAL_SUB, INST_SET_CAP_SUB,
+    INST_SET_MUL, INST_SET_GLOBAL_MUL, INST_SET_CAP_MUL,
+    INST_SET_DIV, INST_SET_GLOBAL_DIV, INST_SET_CAP_DIV,
     INST_FUNCCALL_REF, INST_ARRAY_LITERAL, // arg count // item count
     // 2-op
     INST_JMP = 0x340, INST_JMP_IF_FALSE, INST_JMP_IF_TRUE, // destination
@@ -179,7 +180,8 @@ enum {
     PUSH_NUM = 0x560, // f64
     INST_FOREND, // var id (2), for slot (2), destination (4)
     INST_FORSTART, // var id (2), for slot (2), destination(4) (needed if loop val is 0)
-    INST_LAMBDA,
+    // self-handled
+    INST_LAMBDA = 0x700,
 };
 
 // TODO: make non-global
@@ -233,6 +235,10 @@ uint8_t globals_registered[IDENTIFIER_COUNT] = {};
 uint8_t * locals_registered;
 uint8_t * locals_reg_stack[1024] = {};
 size_t locals_reg_i = 0;
+
+uint8_t * caps_registered;
+uint8_t * caps_reg_stack[1024] = {};
+size_t caps_reg_i = 0;
 
 uint8_t for_loop_index = 0;
 
@@ -316,14 +322,20 @@ void func_start(void)
     func_depth += 1;
     locals_reg_stack[locals_reg_i++] = locals_registered;
     locals_registered = malloc(IDENTIFIER_COUNT);
+    caps_reg_stack[caps_reg_i++] = caps_registered;
+    caps_registered = malloc(IDENTIFIER_COUNT);
 }
 void func_end(void)
 {
     free(locals_registered);
     locals_registered = locals_reg_stack[--locals_reg_i];
+    free(caps_registered);
+    caps_registered = caps_reg_stack[--caps_reg_i];
     func_depth -= 1;
 }
-size_t compile_lambda(const char * source, Token * tokens, size_t count, size_t i);
+size_t compile_lambda(const char * source, Token * tokens, size_t count, size_t i, uint16_t * caps, uint16_t caps_count);
+
+uint16_t active_captures[CAPTURELIMIT];
 
 size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size_t i)
 {
@@ -332,20 +344,20 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
     {
         size_t orig_i = i;
         i += 1;
+        
         if (!token_is(source, tokens, count, i++, "[")) return 0;
-        uint16_t caps[CAPTURELIMIT];
         uint32_t j = 0;
+        uint16_t caps[CAPTURELIMIT];
         PARSE_COMMALIST("]", return 0, return 0, assert(j < CAPTURELIMIT),
             if (tokens[i].kind >= MIN_KEYWORD) return 0;
             caps[j] = lex_ident_offset - tokens[i++].kind;
-            locals_registered[caps[j]] = 1;
         )
         
         func_start();
-        size_t r = compile_lambda(source, tokens, count, i);
+        size_t r = compile_lambda(source, tokens, count, i, caps, j);
         func_end();
         
-        if (r == 0) return 0;
+        if (r == 0) panic("Lambda body is invalid");
         
         return i + r - orig_i;
     }
@@ -543,7 +555,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
             size_t r = compile_expr(source, tokens, count, i + 1, 0);
             if (!r) return i - orig_i;
             i += r + 1;
-            prog_write2(INST_ASSIGN + (func_depth == 0), id);
+            prog_write2(INST_SET + (func_depth == 0), id);
         }
         return i - orig_i;
     }
@@ -609,11 +621,11 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         else if (globals_registered[id]) is_global = 1;
         else panic("Unknown variable");
         
-        if (strncmp(opstr, "=", oplen) == 0)       prog_write(INST_ASSIGN + is_global);
-        else if (strncmp(opstr, "+=", oplen) == 0) prog_write(INST_ASSIGN_ADD + is_global);
-        else if (strncmp(opstr, "-=", oplen) == 0) prog_write(INST_ASSIGN_SUB + is_global);
-        else if (strncmp(opstr, "*=", oplen) == 0) prog_write(INST_ASSIGN_MUL + is_global);
-        else if (strncmp(opstr, "/=", oplen) == 0) prog_write(INST_ASSIGN_DIV + is_global);
+        if (strncmp(opstr, "=", oplen) == 0)       prog_write(INST_SET + is_global);
+        else if (strncmp(opstr, "+=", oplen) == 0) prog_write(INST_SET_ADD + is_global);
+        else if (strncmp(opstr, "-=", oplen) == 0) prog_write(INST_SET_SUB + is_global);
+        else if (strncmp(opstr, "*=", oplen) == 0) prog_write(INST_SET_MUL + is_global);
+        else if (strncmp(opstr, "/=", oplen) == 0) prog_write(INST_SET_DIV + is_global);
         
         prog_write(id);
         return i - orig_i;
@@ -683,11 +695,11 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
             if (!r2) { prog_write(INST_DISCARD); return r; }
             r += r2 + 1;
             program[checkpoint] = INST_INDEX_ADDR;
-            if (token_is(source, tokens, count, old_i, "=" )) prog_write(INST_ASSIGN_ADDR);
-            if (token_is(source, tokens, count, old_i, "+=")) prog_write(INST_ASSIGN_ADDR_ADD);
-            if (token_is(source, tokens, count, old_i, "-=")) prog_write(INST_ASSIGN_ADDR_SUB);
-            if (token_is(source, tokens, count, old_i, "*=")) prog_write(INST_ASSIGN_ADDR_MUL);
-            if (token_is(source, tokens, count, old_i, "/=")) prog_write(INST_ASSIGN_ADDR_DIV);
+            if (token_is(source, tokens, count, old_i, "=" )) prog_write(INST_SET_ADDR);
+            if (token_is(source, tokens, count, old_i, "+=")) prog_write(INST_SET_ADDR_ADD);
+            if (token_is(source, tokens, count, old_i, "-=")) prog_write(INST_SET_ADDR_SUB);
+            if (token_is(source, tokens, count, old_i, "*=")) prog_write(INST_SET_ADDR_MUL);
+            if (token_is(source, tokens, count, old_i, "/=")) prog_write(INST_SET_ADDR_DIV);
         }
         else prog_write(INST_DISCARD);
         return r;
@@ -749,13 +761,16 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
     
     return i - orig_i;
 }
-size_t compile_lambda(const char * source, Token * tokens, size_t count, size_t i)
+size_t compile_lambda(const char * source, Token * tokens, size_t count, size_t i, uint16_t * caps, uint16_t caps_count)
 {
     size_t orig_i = i;
     if (i >= count) return 0;
     
     prog_write5(INST_LAMBDA, 0, 0, 0, 0);
     size_t id_offs = prog_i - 4;
+    
+    prog_write(caps_count);
+    for (size_t j = 0; j < caps_count; j++) prog_write(caps[j]);
     
     uint32_t id = lambda_id++;
     i += compile_register_func(source, tokens, count, id, i);
@@ -1017,7 +1032,7 @@ void interpret(void)
             uint16_t id = program[frame->pc + 1];
             STACK_PUSH(global_frame->vars[id])
         
-        NEXT_CASE(INST_ASSIGN_GLOBAL)
+        NEXT_CASE(INST_SET_GLOBAL)
             Value v = frame->stack[--frame->stackpos];
             uint16_t id = program[frame->pc + 1];
             global_frame->vars[id] = v;
@@ -1029,10 +1044,10 @@ void interpret(void)
             assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");\
             global_frame->vars[id] = val_float(X);
         
-        NEXT_CASE(INST_ASSIGN_GLOBAL_ADD)    GLOBAL_MATH_SHARED(v1.u.f + v2.u.f)
-        NEXT_CASE(INST_ASSIGN_GLOBAL_SUB)    GLOBAL_MATH_SHARED(v1.u.f - v2.u.f)
-        NEXT_CASE(INST_ASSIGN_GLOBAL_MUL)    GLOBAL_MATH_SHARED(v1.u.f * v2.u.f)
-        NEXT_CASE(INST_ASSIGN_GLOBAL_DIV)    GLOBAL_MATH_SHARED(v1.u.f / v2.u.f)
+        NEXT_CASE(INST_SET_GLOBAL_ADD)    GLOBAL_MATH_SHARED(v1.u.f + v2.u.f)
+        NEXT_CASE(INST_SET_GLOBAL_SUB)    GLOBAL_MATH_SHARED(v1.u.f - v2.u.f)
+        NEXT_CASE(INST_SET_GLOBAL_MUL)    GLOBAL_MATH_SHARED(v1.u.f * v2.u.f)
+        NEXT_CASE(INST_SET_GLOBAL_DIV)    GLOBAL_MATH_SHARED(v1.u.f / v2.u.f)
         
         #define MATH_SHARED(X)\
             Value v2 = frame->stack[--frame->stackpos];\
@@ -1105,7 +1120,7 @@ void interpret(void)
             uint16_t id = program[frame->pc + 1];
             STACK_PUSH(val_func(id))
         
-        NEXT_CASE(INST_ASSIGN)
+        NEXT_CASE(INST_SET)
             Value v = frame->stack[--frame->stackpos];
             uint16_t id = program[frame->pc + 1];
             frame->vars[id] = v;
@@ -1117,12 +1132,12 @@ void interpret(void)
             assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");\
             frame->vars[id] = val_float(X);
         
-        NEXT_CASE(INST_ASSIGN_ADD)    LOCAL_MATH_SHARED(v1.u.f + v2.u.f)
-        NEXT_CASE(INST_ASSIGN_SUB)    LOCAL_MATH_SHARED(v1.u.f - v2.u.f)
-        NEXT_CASE(INST_ASSIGN_MUL)    LOCAL_MATH_SHARED(v1.u.f * v2.u.f)
-        NEXT_CASE(INST_ASSIGN_DIV)    LOCAL_MATH_SHARED(v1.u.f / v2.u.f)
+        NEXT_CASE(INST_SET_ADD)    LOCAL_MATH_SHARED(v1.u.f + v2.u.f)
+        NEXT_CASE(INST_SET_SUB)    LOCAL_MATH_SHARED(v1.u.f - v2.u.f)
+        NEXT_CASE(INST_SET_MUL)    LOCAL_MATH_SHARED(v1.u.f * v2.u.f)
+        NEXT_CASE(INST_SET_DIV)    LOCAL_MATH_SHARED(v1.u.f / v2.u.f)
             
-        NEXT_CASE(INST_ASSIGN_ADDR)
+        NEXT_CASE(INST_SET_ADDR)
             Value v2 = frame->stack[--frame->stackpos];
             if (frame->assign_target_agg)
                 *frame->assign_target_agg = v2;
@@ -1140,10 +1155,10 @@ void interpret(void)
             frame->assign_target_agg = 0;\
             *v1p = val_float(X);
         
-        NEXT_CASE(INST_ASSIGN_ADDR_ADD)    ADDR_MATH_SHARED(v1p->u.f + v2.u.f)
-        NEXT_CASE(INST_ASSIGN_ADDR_SUB)    ADDR_MATH_SHARED(v1p->u.f - v2.u.f)
-        NEXT_CASE(INST_ASSIGN_ADDR_MUL)    ADDR_MATH_SHARED(v1p->u.f * v2.u.f)
-        NEXT_CASE(INST_ASSIGN_ADDR_DIV)    ADDR_MATH_SHARED(v1p->u.f / v2.u.f)
+        NEXT_CASE(INST_SET_ADDR_ADD)    ADDR_MATH_SHARED(v1p->u.f + v2.u.f)
+        NEXT_CASE(INST_SET_ADDR_SUB)    ADDR_MATH_SHARED(v1p->u.f - v2.u.f)
+        NEXT_CASE(INST_SET_ADDR_MUL)    ADDR_MATH_SHARED(v1p->u.f * v2.u.f)
+        NEXT_CASE(INST_SET_ADDR_DIV)    ADDR_MATH_SHARED(v1p->u.f / v2.u.f)
         
         #define INDEX_SHARED(STR_VALID_OP)\
             Value v2 = frame->stack[--frame->stackpos];\
