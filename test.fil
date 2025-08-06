@@ -1,7 +1,13 @@
+print("h")
+
+print("q")
 
 func calc(n):
     let sum = 0
     let flip = 1
+    print(n)
+    print(sum)
+    print(flip)
     for i in n:
         sum += flip / (2 * i + 1)
         flip *= -1
