@@ -838,16 +838,9 @@ uint64_t val_hash(Value * v)
     uint64_t hv = 0xf1357aea2e62a9c5;
     
     hash = (hash + v->tag) * hv;
-    if (v->tag == VALUE_FLOAT)
-    {
-        uint64_t n = 0;
-        memcpy(&n, &v->u.f, 8);
-        hash = (hash + n) * hv;
-    }
-    else if (v->tag == VALUE_STRING)
-        for (size_t i = 0; v->u.s[i] != 0; i++) hash = (hash + v->u.s[i]) * hv;
-    else if (v->tag == VALUE_FUNC)
-        hash = (hash + v->u.fn->id) * hv;
+    if (v->tag == VALUE_FLOAT)  hash = (hash + double_bits_safe(v->u.f)) * hv;
+    else if (v->tag == VALUE_STRING) for (size_t i = 0; v->u.s[i] != 0; i++) hash = (hash + v->u.s[i]) * hv;
+    else if (v->tag == VALUE_FUNC)   hash = (hash + v->u.fn->id) * hv;
     
     return hash ^ (hash >> 6);
 }
@@ -1162,13 +1155,10 @@ void interpret(void)
             Value v2 = frame->stack[--frame->stackpos];\
             Value v1 = frame->stack[--frame->stackpos];\
             assert(v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY || v1.tag == VALUE_DICT);\
-            if (v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY)\
-                assert(v2.tag == VALUE_FLOAT);\
-            if (v1.tag == VALUE_DICT)\
-                assert(v2.tag == VALUE_FLOAT || v2.tag == VALUE_STRING\
-                       || v2.tag == VALUE_FUNC || v2.tag == VALUE_NULL);\
-            if (v1.tag == VALUE_STRING)\
-                assert(((size_t)v2.u.f) STR_VALID_OP strlen(v1.u.s));
+            if (v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY) assert(v2.tag == VALUE_FLOAT);\
+            if (v1.tag == VALUE_DICT) assert(v2.tag == VALUE_FLOAT || v2.tag == VALUE_STRING\
+                                             || v2.tag == VALUE_FUNC || v2.tag == VALUE_NULL);\
+            if (v1.tag == VALUE_STRING) assert(((size_t)v2.u.f) STR_VALID_OP strlen(v1.u.s));
     
         NEXT_CASE(INST_INDEX)    INDEX_SHARED(<=)
             if (v1.tag == VALUE_STRING) v1.u.s = stringdupn(v1.u.s + (size_t)v2.u.f, 1);
@@ -1180,6 +1170,9 @@ void interpret(void)
             if (v1.tag == VALUE_STRING) frame->assign_target_char = v1.u.s + (size_t)v2.u.f;
             if (v1.tag == VALUE_ARRAY)  frame->assign_target_agg = array_get(v1.u.a, v2.u.f);
             if (v1.tag == VALUE_DICT)   frame->assign_target_agg = dict_get_or_insert(v1.u.d, &v2);
+        
+        NEXT_CASE(INST_LAMBDA)
+            panic("TODO lambdas")
         
         END_CASE()
         DECAULT_CASE()
