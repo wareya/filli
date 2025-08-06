@@ -22,13 +22,14 @@
 //      null terminated
 
 // void prints(const char * s);
-//      dump every character in s to stdout
+//      dump every character in s to stdout, no implicit trailing newline
 // void eprints(const char * s);
-//      dump every character in s to stderr
+//      dump every character in s to stderr, no implicit trailing newline
+// void printsn(const char * s, size_t len);
+//      stdout print the first <len> characters from s, stopping at any null byte
+//      no implicit trailing newline
 // void printu16hex(uint16_t x);
 //      stdout print the given short as if with "%04X", no trailing newline
-// void printsn(const char * s, size_t len);
-//      stdout print the first <len> characters from s, stopping at any null byte, no trailing newline
 // double badstrtod(const char * s);
 //      parse the given string as a 64-bit float, silently stopping wherever it stops looking like a float
 //      does not need to be accurate

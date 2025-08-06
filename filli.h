@@ -26,7 +26,6 @@
 
 typedef struct _IdEntry { const char * where; uint16_t len; } IdEntry;
 
-int16_t highest_ident_id = 0;
 int16_t insert_or_lookup_id(const char * text, uint16_t len)
 {
     // TODO: make non-static
@@ -34,13 +33,8 @@ int16_t insert_or_lookup_id(const char * text, uint16_t len)
     for (int16_t j = 1; j <= IDENTIFIER_COUNT; j++)
     {
         if (ids[j].len == 0)
-        {
-            ids[j].where = stringdupn(text, len);
-            ids[j].len = len;
-            highest_ident_id = j;
-            return -j;
-        }
-        else if (ids[j].len == len && strncmp(ids[j].where, text, len) == 0)
+            ids[j] = (IdEntry) { stringdupn(text, len), len };
+        if (ids[j].len == len && strncmp(ids[j].where, text, len) == 0)
             return -j;
     }
     panic("Out of IDs");
@@ -81,7 +75,7 @@ void lex_init(void)
     insert_or_lookup_id("let", 3);       // 10
     insert_or_lookup_id("end", 3);       // 11
     insert_or_lookup_id("lambda", 3);    // 12
-    lex_ident_offset = highest_ident_id;
+    lex_ident_offset = 12;
 }
 #define MIN_KEYWORD -12
 
