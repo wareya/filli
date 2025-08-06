@@ -317,6 +317,7 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
 }
 
 #define PARSE_COMMALIST(END, BREAK, BREAK2, LIMITER, HANDLER)\
+    uint32_t j = 0;\
     while (!token_is(source, tokens, count, i, END)) {\
         LIMITER; HANDLER; j += 1;\
         if (!(token_is(source, tokens, count, i, END) || token_is(source, tokens, count, i, ","))) BREAK;\
@@ -356,7 +357,6 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
         i += 1;
         
         if (!token_is(source, tokens, count, i++, "[")) return 0;
-        uint32_t j = 0;
         int16_t * caps = (int16_t *)zalloc(sizeof(int16_t) * CAPTURELIMIT);
         uint16_t * caps_registered_next = (uint16_t *)zalloc(sizeof(uint16_t) * IDENTIFIER_COUNT);
         PARSE_COMMALIST("]", return 0, return 0, assert(j < CAPTURELIMIT),
@@ -399,7 +399,6 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
     {
         size_t orig_i = i++; // skip [
         
-        uint16_t j = 0;
         PARSE_COMMALIST("]", return 0, return 0, assert(j < 32000, "Too many values in array literal"),
             size_t r = compile_expr(source, tokens, count, i, 0);
             if (r == 0) return 0;
@@ -439,7 +438,6 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
     if (token_is(source, tokens, count, i, "("))
     {
         size_t orig_i = i++; // (
-        uint16_t j = 0;
         PARSE_COMMALIST(")",  return 0, return 0, assert(j < ARGLIMIT, "Too many arguments to function"),
             size_t r = compile_expr(source, tokens, count, i, 0);
             if (r == 0) return 0;
@@ -670,8 +668,6 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         uint16_t id = lex_ident_offset - tokens[i++].kind;
         i += 1; // (
         
-        uint16_t j = 0;
-        
         PARSE_COMMALIST(")", return 0, return 0, assert(j < ARGLIMIT, "Too many arguments to function"),
             size_t r = compile_expr(source, tokens, count, i, 0);
             if (r == 0) return 0;
@@ -758,7 +754,6 @@ size_t compile_register_func(const char * source, Token * tokens, size_t count, 
     
     if (!token_is(source, tokens, count, i++, "(")) panic("Invalid funcdef")
     uint16_t args[ARGLIMIT];
-    uint32_t j = 0;
     PARSE_COMMALIST(")", panic("Invalid funcdef"), panic("Invalid funcdef"), assert(j < ARGLIMIT),
         if (tokens[i].kind >= MIN_KEYWORD) panic("Invalid funcdef");
         args[j] = lex_ident_offset - tokens[i++].kind;
