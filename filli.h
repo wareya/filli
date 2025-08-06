@@ -221,7 +221,7 @@ int tokenop_bindlevel(const char * source, Token * tokens, size_t count, size_t 
 struct _Value;
 
 typedef struct _Funcdef {
-    uint8_t exists; uint8_t intrinsic; uint8_t argcount; uint8_t id;
+    uint8_t exists, intrinsic, argcount, id;
     uint32_t loc;
     uint16_t * args;
     uint16_t cap_count;
@@ -279,10 +279,8 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
             prints("\n");
             panic("Unknown identifier");
         }
-        if (program[prog_i - 1] != PUSH_CAP)
-            prog_write(lex_ident_offset - tokens[i].kind);
-        else
-            prog_write(caps_registered[lex_ident_offset-tokens[i].kind] - 1);
+        uint16_t id = lex_ident_offset - tokens[i].kind;
+        prog_write((program[prog_i - 1] != PUSH_CAP) ? id : (caps_registered[id] - 1));
     }
     else if (tokens[i].kind == 1)
     {
@@ -328,7 +326,7 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
 size_t compile_expr(const char * source, Token * tokens, size_t count, size_t i, int right_bind_power);
 size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t i);
 
-void func_start(void)
+void compile_func_start(void)
 {
     func_depth += 1;
     locals_reg_stack[locals_reg_i++] = locals_registered;
@@ -336,7 +334,7 @@ void func_start(void)
     caps_reg_stack[caps_reg_i++] = caps_registered;
     caps_registered = (uint16_t *)zalloc(sizeof(uint16_t) * IDENTIFIER_COUNT);
 }
-void func_end(void)
+void compile_func_end(void)
 {
     free(locals_registered);
     locals_registered = locals_reg_stack[--locals_reg_i];
@@ -361,10 +359,10 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
         PARSE_COMMALIST("]", return 0, return 0, assert(j < CAPTURELIMIT),
             if (tokens[i].kind >= MIN_KEYWORD) return 0;
             int16_t id = lex_ident_offset - tokens[i++].kind;
-            int64_t accessor_id = ~0LL;
-            if (func_depth > 0 && locals_registered[id])    accessor_id = id;
-            else if (func_depth > 0 && caps_registered[id]) accessor_id = -caps_registered[id];
-            if (accessor_id == ~0LL)
+            int16_t accessor_id = 0;
+            if      (func_depth > 0 && locals_registered[id])   accessor_id = id;
+            else if (func_depth > 0 && caps_registered  [id])   accessor_id = -caps_registered[id];
+            else
             {
                 printsn(source + tokens[i - 1].i, tokens[i - 1].len);
                 prints("\n");
@@ -374,10 +372,10 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
             caps_registered_next[id] = j + 1;
         )
         
-        func_start();
+        compile_func_start();
         memcpy(caps_registered, caps_registered_next, sizeof(uint16_t) * IDENTIFIER_COUNT);
         size_t r = compile_lambda(source, tokens, count, i, caps, j);
-        func_end();
+        compile_func_end();
         
         if (r == 0) panic("Lambda body is invalid");
         
@@ -407,7 +405,6 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
 
 size_t compile_expr(const char * source, Token * tokens, size_t count, size_t i, int right_bind_power)
 {
-    if (i >= count) return 0;
     size_t ret = compile_innerexpr(source, tokens, count, i);
     if (ret == 0) return 0;
     i += ret;
@@ -431,7 +428,7 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
     // func calls
     if (token_is(source, tokens, count, i, "("))
     {
-        size_t orig_i = i++; // (
+        size_t orig_i = i++; // skip (
         PARSE_COMMALIST(")",  return 0, return 0, assert(j < ARGLIMIT, "Too many arguments to function"),
             size_t r = compile_expr(source, tokens, count, i, 0);
             if (r == 0) return 0;
@@ -646,10 +643,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         else if (strncmp(opstr, "*=", oplen) == 0) prog_write(INST_SET_MUL + mode);
         else if (strncmp(opstr, "/=", oplen) == 0) prog_write(INST_SET_DIV + mode);
         
-        if (mode != 2)
-            prog_write(id);
-        else
-            prog_write(caps_registered[id] - 1);
+        prog_write((mode != 2) ? id : (caps_registered[id] - 1));
         return i - orig_i;
     }
     else if (i + 2 < count && tokens[i].kind < -lex_ident_offset
@@ -704,10 +698,9 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         }
         i += r;
         
-        if ((token_is(source, tokens, count, i, "=")
+        if (program[prog_i - 1] == INST_INDEX && (token_is(source, tokens, count, i, "=")
              || token_is(source, tokens, count, i, "+=") || token_is(source, tokens, count, i, "-=")
-             || token_is(source, tokens, count, i, "*=") || token_is(source, tokens, count, i, "/="))
-            && program[prog_i - 1] == INST_INDEX)
+             || token_is(source, tokens, count, i, "*=") || token_is(source, tokens, count, i, "/=")))
         {
             size_t old_i = i;
             uint32_t checkpoint = prog_i - 1;
@@ -785,14 +778,10 @@ size_t compile_lambda(const char * source, Token * tokens, size_t count, size_t 
 {
     size_t orig_i = i;
     if (i >= count) return 0;
-    
-    prog_write3(INST_LAMBDA, 0, 0);
-    size_t id_offs = prog_i - 2;
-    
-    prog_write2(0, 0);
-    size_t target_offs = prog_i - 2;
-    
     uint32_t id = lambda_id++;
+    
+    prog_write5(INST_LAMBDA, 0, 0, 0, 0);
+    size_t id_offs = prog_i - 4;
     memcpy(program + id_offs, &id, 4);
     
     i += compile_register_func(source, tokens, count, id, i);
@@ -800,21 +789,20 @@ size_t compile_lambda(const char * source, Token * tokens, size_t count, size_t 
     funcs_registered[id].caps = caps;
     funcs_registered[id].cap_count = caps_count;
     
-    memcpy(program + target_offs, &prog_i, 4);
+    memcpy(program + id_offs + 2, &prog_i, 4);
     
     return i - orig_i;
 }
 size_t compile(const char * source, Token * tokens, size_t count, size_t i)
 {
-    size_t orig_i = i;
+    size_t r, orig_i = i;
     while (i < count)
     {
-        size_t r;
         if (tokens[i].kind == -4) // func
         {
-            func_start();
+            compile_func_start();
             r = compile_func(source, tokens, count, i+1);
-            func_end();
+            compile_func_end();
             assert(r != 0, "Incomplete function");
             i += r + 1;
         }
@@ -918,13 +906,11 @@ uint8_t val_truthy(Value v)
 }
 
 typedef struct _Frame {
-    size_t pc;
+    size_t pc, stackpos;
     struct _Frame * return_to;
-    size_t stackpos;
     Value * assign_target_agg;
     char * assign_target_char;
-    Value vars[FRAME_VARCOUNT];
-    Value stack[FRAME_STACKSIZE];
+    Value vars[FRAME_VARCOUNT], stack[FRAME_STACKSIZE];
     double forloops[FORLOOP_COUNT_LIMIT];
     Value ** caps;
 } Frame;
@@ -939,7 +925,7 @@ void interpret(void)
     assert(frame, "Out of memory");
     
     Frame * global_frame = frame;
-
+    
     #define CASES_START() \
     while (frame->pc < prog_i) {\
         uint16_t op = program[frame->pc];\
@@ -953,8 +939,6 @@ void interpret(void)
     #define DECAULT_CASE() default: print_op_and_panic(op);
     
     #define NEXT_CASE(X) END_CASE() MARK_CASE(X)
-
-    memset(frame, 0, sizeof(Frame));
     
     CASES_START()
         
@@ -966,27 +950,20 @@ void interpret(void)
         NEXT_CASE(INST_FUNCDEF)     READ_AND_GOTO_TARGET(1)
         
         #define STACK_PUSH(X)\
+            assert(frame->stackpos < FRAME_STACKSIZE);\
             frame->stack[frame->stackpos++] = X;
-            assert(frame->stackpos < FRAME_STACKSIZE);
         
         NEXT_CASE(INST_ARRAY_LITERAL)
             uint16_t itemcount = program[frame->pc + 1];
             Value v = val_tagged(VALUE_ARRAY);
             v.u.a = (Array *)zalloc(sizeof(Array));
-            v.u.a->buf = (Value *)zalloc(sizeof(Value) * itemcount);
-            v.u.a->len = itemcount;
-            v.u.a->cap = itemcount;
+            *v.u.a = (Array) { (Value *)zalloc(sizeof(Value) * itemcount), itemcount, itemcount };
             while (itemcount > 0) v.u.a->buf[--itemcount] = frame->stack[--frame->stackpos];
             STACK_PUSH(v)
         
         #define ENTER_FUNC()\
             assert(fn->exists);\
-            if (fn->intrinsic)\
-            {\
-                handle_intrinsic_func(fn->id, argcount, frame);\
-                frame->stackpos -= argcount;\
-            }\
-            else\
+            if (!fn->intrinsic)\
             {\
                 Frame * prev = frame;\
                 Frame * next = (Frame *)zalloc(sizeof(Frame));\
@@ -994,19 +971,20 @@ void interpret(void)
                 PC_INC();\
                 next->return_to = frame;\
                 frame = next;\
-                assert(argcount == fn->argcount);\
+                assert(argcount == fn->argcount, "Function arg count doesn't match");\
                 for (size_t i = fn->argcount; i > 0;)\
                     frame->vars[fn->args[--i]] = prev->stack[--prev->stackpos];\
                 if (fn->cap_data) frame->caps = fn->cap_data; \
                 prev->stack[--prev->stackpos];\
                 frame->pc = fn->loc;\
                 continue;\
-            }
+            }\
+            handle_intrinsic_func(fn->id, argcount, frame);\
+            frame->stackpos -= argcount; // intrinsics
         
         NEXT_CASE(INST_FUNCCALL)
-            uint16_t id = program[frame->pc + 1];
             uint16_t argcount = program[frame->pc + 2];
-            Funcdef * fn = &funcs_registered[id];
+            Funcdef * fn = &funcs_registered[program[frame->pc + 1]];
             ENTER_FUNC()
         
         NEXT_CASE(INST_FUNCCALL_REF)
@@ -1033,7 +1011,6 @@ void interpret(void)
             STACK_PUSH(val_tagged(VALUE_NULL))
         
         NEXT_CASE(PUSH_DICT_EMPTY)
-            memset(&frame->stack[frame->stackpos], 0, sizeof(Value));
             Value v = val_tagged(VALUE_DICT);
             v.u.d = (Dict *)zalloc(sizeof(Dict));
             STACK_PUSH(v)
@@ -1044,20 +1021,16 @@ void interpret(void)
             STACK_PUSH(val_float(f))
         
         NEXT_CASE(PUSH_GLOBAL)
-            uint16_t id = program[frame->pc + 1];
-            STACK_PUSH(global_frame->vars[id])
+            STACK_PUSH(global_frame->vars[program[frame->pc + 1]])
         NEXT_CASE(INST_SET_GLOBAL)
             Value v = frame->stack[--frame->stackpos];
-            uint16_t id = program[frame->pc + 1];
-            global_frame->vars[id] = v;
+            global_frame->vars[program[frame->pc + 1]] = v;
         
         NEXT_CASE(PUSH_CAP)
-            uint16_t id = program[frame->pc + 1];
-            STACK_PUSH(*frame->caps[id])
+            STACK_PUSH(*frame->caps[program[frame->pc + 1]])
         NEXT_CASE(INST_SET_CAP)
             Value v = frame->stack[--frame->stackpos];
-            uint16_t id = program[frame->pc + 1];
-            *frame->caps[id] = v;
+            *frame->caps[program[frame->pc + 1]] = v;
         
         #define GLOBAL_MATH_SHARED(X)\
             Value v2 = frame->stack[--frame->stackpos];\
@@ -1112,9 +1085,8 @@ void interpret(void)
             else if (v1.tag == VALUE_FLOAT && (v1.u.f != v1.u.f || v2.u.f != v2.u.f)) equality = 2;\
             else if (v1.tag == VALUE_FLOAT && v1.u.f < v2.u.f) equality = -1;\
             else if (v1.tag == VALUE_FLOAT && v1.u.f > v2.u.f) equality = 1;\
-            else if (v1.tag == VALUE_FLOAT && v1.u.f == v2.u.f) equality = 0;\
             else if (v1.tag == VALUE_STRING) equality = strcmp(v1.u.s, v2.u.s);\
-            else if (v1.tag == VALUE_ARRAY) equality = (v1.u.a != v2.u.a) * 2;\
+            else if (v1.tag == VALUE_ARRAY && v1.u.a != v2.u.a) equality = 2;\
             frame->stack[frame->stackpos++] = val_float(X);
             // 0: equal, 2: neq (unordered). -1: lt. 1: gt.
         
@@ -1152,20 +1124,14 @@ void interpret(void)
             if (val_truthy(frame->stack[--frame->stackpos])) READ_AND_GOTO_TARGET(1)
         
         NEXT_CASE(PUSH_STRING)
-            uint16_t id = program[frame->pc + 1];
-            char * s = stringdup(compiled_strings[id]);
-            STACK_PUSH(val_string(s))
+            STACK_PUSH(val_string(stringdup(compiled_strings[program[frame->pc + 1]])))
         NEXT_CASE(PUSH_LOCAL)
-            uint16_t id = program[frame->pc + 1];
-            STACK_PUSH(frame->vars[id])
+            STACK_PUSH(frame->vars[program[frame->pc + 1]])
         NEXT_CASE(PUSH_FUNCNAME)
-            uint16_t id = program[frame->pc + 1];
-            STACK_PUSH(val_func(id))
+            STACK_PUSH(val_func(program[frame->pc + 1]))
         
         NEXT_CASE(INST_SET)
-            Value v = frame->stack[--frame->stackpos];
-            uint16_t id = program[frame->pc + 1];
-            frame->vars[id] = v;
+            frame->vars[program[frame->pc + 1]] = frame->stack[--frame->stackpos];
         
         #define LOCAL_MATH_SHARED(X)\
             Value v2 = frame->stack[--frame->stackpos];\
@@ -1220,8 +1186,7 @@ void interpret(void)
             if (v1.tag == VALUE_DICT)   frame->assign_target_agg = dict_get_or_insert(v1.u.d, &v2);
         
         NEXT_CASE(INST_LAMBDA)
-            uint16_t id = program[frame->pc + 1];
-            Value v = val_func(id);
+            Value v = val_func(program[frame->pc + 1]);
             Funcdef * f = (Funcdef *)zalloc(sizeof(Funcdef));
             *f = *v.u.fn;
             //printf("%p\n", f->caps);
@@ -1240,9 +1205,7 @@ void interpret(void)
 void register_intrinsic_func(const char * s)
 {
     int16_t id = lex_ident_offset - insert_or_lookup_id(s, strlen(s));
-    funcs_registered[id].exists = 1;
-    funcs_registered[id].intrinsic = 1;
-    funcs_registered[id].id = id;
+    funcs_registered[id] = (Funcdef) {1, 1, 0, id, prog_i, 0, 0, 0, 0};
 }
 
 #include "intrinsics.h"
