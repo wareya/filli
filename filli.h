@@ -6,7 +6,7 @@
 // - rewrite intrinsics.h, adding whatever functionality you need (e.g. trig, array insert/delete/splice)
 // - skim microlib.h, consider replacing it with thin stdlib wrappers
 
-#define IDENTIFIER_COUNT 32000
+#define IDENTIFIER_COUNT 32000 // max number of uniquely-spelled identifiers per program
 #define FRAME_VARCOUNT 1024 // increases memory usage of stack frames
 #define FRAME_STACKSIZE 1024 // increases memory usage of stack frames
 #define PROGRAM_MAXLEN 100000 // default max length of program
@@ -63,18 +63,23 @@ int lex_ident_offset = 0;
 void lex_init(void)
 {
     // give keywords known ids
-    insert_or_lookup_id("if", 2);        // 1
-    insert_or_lookup_id("else", 4);      // 2
-    insert_or_lookup_id("elif", 4);      // 3
-    insert_or_lookup_id("func", 4);      // 4
-    insert_or_lookup_id("while", 5);     // 5
-    insert_or_lookup_id("for", 3);       // 6
-    insert_or_lookup_id("break", 5);     // 7
-    insert_or_lookup_id("continue", 8);  // 8
-    insert_or_lookup_id("return", 6);    // 9
-    insert_or_lookup_id("let", 3);       // 10
-    insert_or_lookup_id("end", 3);       // 11
-    insert_or_lookup_id("lambda", 3);    // 12
+    const char * keywords[] = { "if", "else", "elif", "func", "while", "for", "break", "continue", "return", "let", "end", "lambda"};
+    for (size_t j = 0; j < sizeof(keywords) / sizeof(keywords[0]); j++)
+        insert_or_lookup_id(keywords[j], strlen(keywords[j]));
+
+    // 1: if
+    // 2: else
+    // 3: elif
+    // 4: func
+    // 5: while
+    // 6: for
+    // 7: break
+    // 8: continue
+    // 9: return
+    // 10: let
+    // 11: end
+    // 12: lambda
+    
     lex_ident_offset = 12;
 }
 #define MIN_KEYWORD -12
