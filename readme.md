@@ -4,7 +4,7 @@ Filli is an ultra small (language code under 1000 cloc) dynamic programming lang
 
 Embeddable, header-only, not horribly slow, and configurable. The reference `.fil` file runner compiles down to 34 KB with `clang -Os -flto` etc. Depending on compiler flags, the microbenchmarks I've tested vary from 35% to 50% the runtime of the Lua equivalent -- Lua is a very fast interpreter, so this means that Filli isn't horribly inefficient.
 
-Meant to be used while linking to BDW GC ("Boehm" GC) or some similar interior-pointer-aware conservative GC. If your Filli threads are only ever going to be short lived, you can #define NO_GC before including it to disable all the GC stuff. 
+Filli is meant to be used with BDWGC (aka Boehm GC) or some similar interior-pointer-aware conservative GC. If your Filli threads are only ever going to be short lived, you can #define NO_GC before including it to disable all the GC stuff.
 
 ## Features
 
@@ -76,3 +76,28 @@ f()
 # 2.280000000
 
 ```
+
+## Integration
+
+Include `filli.h` in your project, as well as `intrinsics.h` and `microlib.h`. Add `#include "filli.h"` or similar to a SINGLE translation unit in your project and then re-expose it from there.
+
+**Filli intentionally leaks memory!** You should include libgc / BDWGC before including `filli.h`, like so:
+
+```c
+#include <gc.h>
+#define malloc(X) GC_MALLOC(X)
+#define calloc(X, Y) GC_MALLOC(X*Y)
+#define realloc(X, Y) GC_REALLOC(X, Y)
+#define free(X) GC_FREE(X)
+```
+
+Read `microlib.h` and consider replacing it with wrappers around stdlib functions. In particular, the float-vs-string-related functions aren't particularly accurate and you should consider replacing them with more accurate ones.
+
+If you need to add more predefined functions, add them in `intrinsics.h`.
+
+Filli uses assertions to validate that it's not about to do something invalid or memory-unsafe, so if you accept user-defined scripts, run it on a separate thread and check for premature termination.
+
+## License
+
+Apache 2.0 or MIT, at your choice
+
