@@ -706,10 +706,9 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         size_t r = compile_expr(source, tokens, count, i, 0);
         if (r == 0)
         {
-            prints("AT: ");
             printsn(source + tokens[i].i, tokens[i].len);
             prints("\n");
-            panic("TODO");
+            panic("Unrecognized expression or statement");
         }
         i += r;
         

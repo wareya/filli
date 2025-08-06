@@ -97,8 +97,8 @@ print(0 and 0)
 print(0 or 0)
 
 func fwrap():
-    let z = 5
-    let f = lambda[z](): print("sadkgew") z -= 0.93 print(z) print("jiregdsoaw") end
+    let z = 5 + 1
+    let f = lambda[z](): z -= 0.93 print(z) end
     f()
     f()
     return f
