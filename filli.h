@@ -984,20 +984,17 @@ void interpret(void)
             uint16_t id = program[frame->pc + 1];
             global_frame->vars[id] = v;
         
-        #define GLOBAL_MATH_SHARED()\
+        #define GLOBAL_MATH_SHARED(X)\
             Value v2 = frame->stack[--frame->stackpos];\
             uint16_t id = program[frame->pc + 1];\
             Value v1 = global_frame->vars[id];\
-            assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
+            assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");\
+            global_frame->vars[id] = val_float(X);
         
-        NEXT_CASE(INST_ASSIGN_GLOBAL_ADD)    GLOBAL_MATH_SHARED()
-            global_frame->vars[id] = val_float(v1.u.f + v2.u.f);
-        NEXT_CASE(INST_ASSIGN_GLOBAL_SUB)    GLOBAL_MATH_SHARED()
-            global_frame->vars[id] = val_float(v1.u.f - v2.u.f);
-        NEXT_CASE(INST_ASSIGN_GLOBAL_MUL)    GLOBAL_MATH_SHARED()
-            global_frame->vars[id] = val_float(v1.u.f * v2.u.f);
-        NEXT_CASE(INST_ASSIGN_GLOBAL_DIV)    GLOBAL_MATH_SHARED()
-            global_frame->vars[id] = val_float(v1.u.f / v2.u.f);
+        NEXT_CASE(INST_ASSIGN_GLOBAL_ADD)    GLOBAL_MATH_SHARED(v1.u.f + v2.u.f)
+        NEXT_CASE(INST_ASSIGN_GLOBAL_SUB)    GLOBAL_MATH_SHARED(v1.u.f - v2.u.f)
+        NEXT_CASE(INST_ASSIGN_GLOBAL_MUL)    GLOBAL_MATH_SHARED(v1.u.f * v2.u.f)
+        NEXT_CASE(INST_ASSIGN_GLOBAL_DIV)    GLOBAL_MATH_SHARED(v1.u.f / v2.u.f)
         
         #define MATH_SHARED(X)\
             Value v2 = frame->stack[--frame->stackpos];\
@@ -1078,20 +1075,17 @@ void interpret(void)
             uint16_t id = program[frame->pc + 1];
             frame->vars[id] = v;
         
-        #define LOCAL_MATH_SHARED()\
+        #define LOCAL_MATH_SHARED(X)\
             Value v2 = frame->stack[--frame->stackpos];\
             uint16_t id = program[frame->pc + 1];\
             Value v1 = frame->vars[id];\
-            assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
+            assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");\
+            frame->vars[id] = val_float(X);
         
-        NEXT_CASE(INST_ASSIGN_ADD)    LOCAL_MATH_SHARED()
-            frame->vars[id] = val_float(v1.u.f + v2.u.f);
-        NEXT_CASE(INST_ASSIGN_SUB)    LOCAL_MATH_SHARED()
-            frame->vars[id] = val_float(v1.u.f - v2.u.f);
-        NEXT_CASE(INST_ASSIGN_MUL)    LOCAL_MATH_SHARED()
-            frame->vars[id] = val_float(v1.u.f * v2.u.f);
-        NEXT_CASE(INST_ASSIGN_DIV)    LOCAL_MATH_SHARED()
-            frame->vars[id] = val_float(v1.u.f / v2.u.f);
+        NEXT_CASE(INST_ASSIGN_ADD)    LOCAL_MATH_SHARED(v1.u.f + v2.u.f)
+        NEXT_CASE(INST_ASSIGN_SUB)    LOCAL_MATH_SHARED(v1.u.f - v2.u.f)
+        NEXT_CASE(INST_ASSIGN_MUL)    LOCAL_MATH_SHARED(v1.u.f * v2.u.f)
+        NEXT_CASE(INST_ASSIGN_DIV)    LOCAL_MATH_SHARED(v1.u.f / v2.u.f)
             
         NEXT_CASE(INST_ASSIGN_ADDR)
             Value v2 = frame->stack[--frame->stackpos];
@@ -1104,20 +1098,17 @@ void interpret(void)
             frame->assign_target_agg = 0;
             frame->assign_target_char = 0;
         
-        #define ADDR_MATH_SHARED()\
+        #define ADDR_MATH_SHARED(X)\
             Value v2 = frame->stack[--frame->stackpos];\
             Value * v1p = frame->assign_target_agg;\
             assert(v1p && v2.tag == VALUE_FLOAT && v1p->tag == VALUE_FLOAT, "Math only works on numbers");\
-            frame->assign_target_agg = 0;
+            frame->assign_target_agg = 0;\
+            *v1p = val_float(X);
         
-        NEXT_CASE(INST_ASSIGN_ADDR_ADD)    ADDR_MATH_SHARED()
-            *v1p = val_float(v1p->u.f + v2.u.f);
-        NEXT_CASE(INST_ASSIGN_ADDR_SUB)    ADDR_MATH_SHARED()
-            *v1p = val_float(v1p->u.f - v2.u.f);
-        NEXT_CASE(INST_ASSIGN_ADDR_MUL)    ADDR_MATH_SHARED()
-            *v1p = val_float(v1p->u.f * v2.u.f);
-        NEXT_CASE(INST_ASSIGN_ADDR_DIV)    ADDR_MATH_SHARED()
-            *v1p = val_float(v1p->u.f / v2.u.f);
+        NEXT_CASE(INST_ASSIGN_ADDR_ADD)    ADDR_MATH_SHARED(v1p->u.f + v2.u.f)
+        NEXT_CASE(INST_ASSIGN_ADDR_SUB)    ADDR_MATH_SHARED(v1p->u.f - v2.u.f)
+        NEXT_CASE(INST_ASSIGN_ADDR_MUL)    ADDR_MATH_SHARED(v1p->u.f * v2.u.f)
+        NEXT_CASE(INST_ASSIGN_ADDR_DIV)    ADDR_MATH_SHARED(v1p->u.f / v2.u.f)
         
         #define INDEX_SHARED(STR_VALID_OP)\
             Value v2 = frame->stack[--frame->stackpos];\
