@@ -13,6 +13,7 @@
 #define FORLOOP_COUNT_LIMIT 255 // increases memory usage of stack frames
 #define ARGLIMIT 255 // affects risk of stack smashing during compilation
 #define ELIFLIMIT 255 // affects risk of stack smashing during compilation
+#define CAPTURELIMIT 255
 
 // OTHER LIMITS
 
@@ -229,8 +230,11 @@ uint16_t compiled_string_i = 0;
 
 uint8_t in_global = 1;
 Funcdef funcs_registered[IDENTIFIER_COUNT] = {};
-uint8_t locals_registered[IDENTIFIER_COUNT] = {};
 uint8_t globals_registered[IDENTIFIER_COUNT] = {};
+
+uint8_t * locals_registered;
+uint8_t * locals_reg_stack[1024] = {};
+size_t locals_reg_i = 0;
 
 uint8_t for_loop_index = 0;
 
@@ -298,14 +302,15 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
     return 1;
 }
 
-#define PARSE_COMMALIST(END, HANDLE)\
+#define PARSE_COMMALIST(END, BREAK, BREAK2, LIMITER, HANDLE)\
     while (!token_is(source, tokens, count, i, END)) {\
-        HANDLE\
+        LIMITER;\
+        HANDLE;\
         j += 1;\
-        if (!(token_is(source, tokens, count, i, END) || token_is(source, tokens, count, i, ","))) return 0;\
+        if (!(token_is(source, tokens, count, i, END) || token_is(source, tokens, count, i, ","))) BREAK;\
         if (token_is(source, tokens, count, i, ",")) i++;\
     }\
-    if (!token_is(source, tokens, count, i++, END)) return 0;
+    if (!token_is(source, tokens, count, i++, END)) BREAK2;
 
 size_t compile_expr(const char * source, Token * tokens, size_t count, size_t i, int right_bind_power);
 size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t i);
@@ -313,6 +318,29 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
 size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size_t i)
 {
     if (i >= count) return 0;
+    if (token_is(source, tokens, count, i, "lambda"))
+    {
+        i += 1;
+        if (!token_is(source, tokens, count, i++, "[")) return 0;
+        uint16_t caps[CAPTURELIMIT];
+        uint32_t j = 0;
+        PARSE_COMMALIST("]", return 0, return 0, assert(j < CAPTURELIMIT),
+            if (tokens[i].kind >= MIN_KEYWORD) return 0;
+            caps[j] = lex_ident_offset - tokens[i++].kind;
+            locals_registered[caps[j]] = 1;
+        )
+        uint32_t capcount = j; (void)capcount;
+        
+        if (!token_is(source, tokens, count, i++, "(")) return 0;
+        uint16_t args[ARGLIMIT];
+        j = 0;
+        PARSE_COMMALIST(")", return 0, return 0, assert(j < ARGLIMIT),
+            if (tokens[i].kind >= MIN_KEYWORD) return 0;
+            args[j] = lex_ident_offset - tokens[i++].kind;
+            locals_registered[args[j]] = 1;
+        )
+        
+    }
     if (token_is(source, tokens, count, i, "(")) // wrapped expr
     {
         size_t ret = compile_expr(source, tokens, count, i+1, 0) + 1;
@@ -324,10 +352,9 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
         size_t orig_i = i++; // skip [
         
         uint16_t j = 0;
-        PARSE_COMMALIST("]", 
+        PARSE_COMMALIST("]", return 0, return 0, assert(j < 32000, "Too many values in array literal"),
             size_t r = compile_expr(source, tokens, count, i, 0);
             if (r == 0) return 0;
-            assert(j < 32000, "Too many values in array literal (limit is 32000)");
             i += r;
         )
         
@@ -365,10 +392,9 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
     {
         size_t orig_i = i++; // (
         uint16_t j = 0;
-        PARSE_COMMALIST(")", 
+        PARSE_COMMALIST(")",  return 0, return 0, assert(j < ARGLIMIT, "Too many arguments to function"),
             size_t r = compile_expr(source, tokens, count, i, 0);
             if (r == 0) return 0;
-            assert(j < ARGLIMIT, "Too many arguments to function");
             i += r;
         )
         
@@ -593,10 +619,9 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         
         uint16_t j = 0;
         
-        PARSE_COMMALIST(")",
+        PARSE_COMMALIST(")", return 0, return 0, assert(j < ARGLIMIT, "Too many arguments to function"),
             size_t r = compile_expr(source, tokens, count, i, 0);
             if (r == 0) return 0;
-            assert(j < ARGLIMIT, "Too many arguments to function");
             i += r;
         )
         
@@ -678,13 +703,12 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
     if (i >= count) return 0;
     if (tokens[i].kind >= MIN_KEYWORD) return 0;
     int16_t id = lex_ident_offset - tokens[i++].kind;
+    
     if (!token_is(source, tokens, count, i++, "(")) return 0;
     uint16_t args[ARGLIMIT];
     uint32_t j = 0;
-    
-    PARSE_COMMALIST(")",
+    PARSE_COMMALIST(")", return 0, return 0, assert(j < ARGLIMIT),
         if (tokens[i].kind >= MIN_KEYWORD) return 0;
-        assert(j < ARGLIMIT);
         args[j] = lex_ident_offset - tokens[i++].kind;
         locals_registered[args[j]] = 1;
     )
@@ -709,6 +733,22 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
     
     return i - orig_i;
 }
+size_t compile_func_w(const char * source, Token * tokens, size_t count, size_t i)
+{
+    in_global = 0;
+    
+    locals_reg_stack[locals_reg_i++] = locals_registered;
+    locals_registered = malloc(IDENTIFIER_COUNT);
+
+    size_t r = compile_func(source, tokens, count, i);
+    
+    free(locals_registered);
+    locals_registered = locals_reg_stack[--locals_reg_i];
+    
+    in_global = 1;
+    return r;
+}
+
 size_t compile(const char * source, Token * tokens, size_t count, size_t i)
 {
     size_t orig_i = i;
@@ -717,11 +757,7 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
         size_t r;
         if (tokens[i].kind == -4) // func
         {
-            in_global = 0;
-            memset(locals_registered, 0, sizeof(locals_registered));
-            r = compile_func(source, tokens, count, i+1);
-            memset(locals_registered, 0, sizeof(locals_registered));
-            in_global = 1;
+            r = compile_func_w(source, tokens, count, i+1);
             assert(r != 0, "Incomplete function");
             i += r + 1;
             
