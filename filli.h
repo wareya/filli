@@ -999,26 +999,20 @@ void interpret(void)
         NEXT_CASE(INST_ASSIGN_GLOBAL_DIV)    GLOBAL_MATH_SHARED()
             global_frame->vars[id] = val_float(v1.u.f / v2.u.f);
         
-        #define MATH_SHARED()\
+        #define MATH_SHARED(X)\
             Value v2 = frame->stack[--frame->stackpos];\
             Value v1 = frame->stack[--frame->stackpos];\
-            assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");
+            assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers");\
+            frame->stack[frame->stackpos++] = val_float(X);
         
-        NEXT_CASE(INST_ADD)    MATH_SHARED()
-            frame->stack[frame->stackpos++] = val_float(v1.u.f + v2.u.f);
-        NEXT_CASE(INST_SUB)    MATH_SHARED()
-            frame->stack[frame->stackpos++] = val_float(v1.u.f - v2.u.f);
-        NEXT_CASE(INST_MUL)    MATH_SHARED()
-            frame->stack[frame->stackpos++] = val_float(v1.u.f * v2.u.f);
-        NEXT_CASE(INST_DIV)    MATH_SHARED()
-            frame->stack[frame->stackpos++] = val_float(v1.u.f / v2.u.f);
+        NEXT_CASE(INST_ADD)    MATH_SHARED(v1.u.f + v2.u.f)
+        NEXT_CASE(INST_SUB)    MATH_SHARED(v1.u.f - v2.u.f)
+        NEXT_CASE(INST_MUL)    MATH_SHARED(v1.u.f * v2.u.f)
+        NEXT_CASE(INST_DIV)    MATH_SHARED(v1.u.f / v2.u.f)
+        NEXT_CASE(INST_CMP_AND)    MATH_SHARED(!!(v1.u.f) && !!(v2.u.f))
+        NEXT_CASE(INST_CMP_OR)     MATH_SHARED(!!(v1.u.f) || !!(v2.u.f))
         
-        NEXT_CASE(INST_CMP_AND)    MATH_SHARED()
-            frame->stack[frame->stackpos++] = val_float(!!(v1.u.f) && !!(v2.u.f));
-        NEXT_CASE(INST_CMP_OR)     MATH_SHARED()
-            frame->stack[frame->stackpos++] = val_float(!!(v1.u.f) || !!(v2.u.f));
-        
-        #define EQ_SHARED()\
+        #define EQ_SHARED(X)\
             Value v2 = frame->stack[--frame->stackpos];\
             Value v1 = frame->stack[--frame->stackpos];\
             int8_t equality = 0;\
@@ -1028,21 +1022,16 @@ void interpret(void)
             else if (v1.tag == VALUE_FLOAT && v1.u.f > v2.u.f) equality = 1;\
             else if (v1.tag == VALUE_FLOAT && v1.u.f == v2.u.f) equality = 0;\
             else if (v1.tag == VALUE_STRING) equality = strcmp(v1.u.s, v2.u.s);\
-            else if (v1.tag == VALUE_ARRAY) equality = (v1.u.a != v2.u.a) * 2;
+            else if (v1.tag == VALUE_ARRAY) equality = (v1.u.a != v2.u.a) * 2;\
+            frame->stack[frame->stackpos++] = val_float(X);
             // 0: equal, 2: neq (unordered). -1: lt. 1: gt.
         
-        NEXT_CASE(INST_CMP_EQ)    EQ_SHARED()
-            frame->stack[frame->stackpos++] = val_float(equality == 0);
-        NEXT_CASE(INST_CMP_NE)    EQ_SHARED()
-            frame->stack[frame->stackpos++] = val_float(equality != 0);
-        NEXT_CASE(INST_CMP_LE)    EQ_SHARED()
-            frame->stack[frame->stackpos++] = val_float(equality == 0 || equality == 1);
-        NEXT_CASE(INST_CMP_GE)    EQ_SHARED()
-            frame->stack[frame->stackpos++] = val_float(equality == 0 || equality == -1);
-        NEXT_CASE(INST_CMP_LT)    EQ_SHARED()
-            frame->stack[frame->stackpos++] = val_float(equality == 1);
-        NEXT_CASE(INST_CMP_GT)    EQ_SHARED()
-            frame->stack[frame->stackpos++] = val_float(equality == -1);
+        NEXT_CASE(INST_CMP_EQ)    EQ_SHARED(equality == 0)
+        NEXT_CASE(INST_CMP_NE)    EQ_SHARED(equality != 0)
+        NEXT_CASE(INST_CMP_LE)    EQ_SHARED(equality == 0 || equality == 1)
+        NEXT_CASE(INST_CMP_GE)    EQ_SHARED(equality == 0 || equality == -1)
+        NEXT_CASE(INST_CMP_LT)    EQ_SHARED(equality == 1)
+        NEXT_CASE(INST_CMP_GT)    EQ_SHARED(equality == -1)
         
         NEXT_CASE(INST_FORSTART)
             Value v = frame->stack[--frame->stackpos];
