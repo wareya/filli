@@ -77,11 +77,10 @@ void lex_init(void)
     insert_or_lookup_id("continue", 8);  // 8
     insert_or_lookup_id("return", 6);    // 9
     insert_or_lookup_id("let", 3);       // 10
-    insert_or_lookup_id("begin", 3);     // 11
-    insert_or_lookup_id("end", 3);       // 12
+    insert_or_lookup_id("end", 3);       // 11
     lex_ident_offset = highest_ident_id;
 }
-#define MIN_KEYWORD -12
+#define MIN_KEYWORD -11
 
 Token * tokenize(const char * src, size_t * count)
 {
@@ -299,6 +298,15 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
     return 1;
 }
 
+#define PARSE_COMMALIST(END, HANDLE)\
+    while (!token_is(source, tokens, count, i, END)) {\
+        HANDLE\
+        j += 1;\
+        if (!(token_is(source, tokens, count, i, END) || token_is(source, tokens, count, i, ","))) return 0;\
+        if (token_is(source, tokens, count, i, ",")) i++;\
+    }\
+    if (!token_is(source, tokens, count, i++, END)) return 0;
+
 size_t compile_expr(const char * source, Token * tokens, size_t count, size_t i, int right_bind_power);
 size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t i);
 
@@ -316,18 +324,12 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
         size_t orig_i = i++; // skip [
         
         uint16_t j = 0;
-        while (!token_is(source, tokens, count, i, "]"))
-        {
+        PARSE_COMMALIST("]", 
             size_t r = compile_expr(source, tokens, count, i, 0);
             if (r == 0) return 0;
             assert(j < 32000, "Too many values in array literal (limit is 32000)");
-            j += 1;
             i += r;
-            
-            if (!(token_is(source, tokens, count, i, "]") || token_is(source, tokens, count, i, ","))) return 0;
-            if (token_is(source, tokens, count, i, ",")) i++;
-        }
-        if (!token_is(source, tokens, count, i++, "]")) return 0;
+        )
         
         prog_write2(INST_ARRAY_LITERAL, j);
         return i - orig_i;
@@ -363,18 +365,12 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
     {
         size_t orig_i = i++; // (
         uint16_t j = 0;
-        while (!token_is(source, tokens, count, i, ")"))
-        {
+        PARSE_COMMALIST(")", 
             size_t r = compile_expr(source, tokens, count, i, 0);
             if (r == 0) return 0;
-            assert(j++ < ARGLIMIT, "Too many arguments to function");
+            assert(j < ARGLIMIT, "Too many arguments to function");
             i += r;
-            
-            if (!(token_is(source, tokens, count, i, ")") || token_is(source, tokens, count, i, ",")))
-                return 0;
-            if (token_is(source, tokens, count, i, ",")) i++;
-        }
-        if (!token_is(source, tokens, count, i++, ")")) return 0;
+        )
         
         prog_write2(INST_FUNCCALL_REF, j);
         return i - orig_i;
@@ -460,7 +456,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
                 i += compile_statementlist(source, tokens, count, i);
             }
         }
-        assert(tokens[i].kind == -12, "Missing end keyword");
+        assert(tokens[i].kind == -11, "Missing end keyword");
         uint32_t real_end = prog_i;
         while (skip_i > 0) memcpy(program + skips[--skip_i], &real_end, 4);
         i += 1;
@@ -482,7 +478,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         
         i += compile_statementlist(source, tokens, count, i);
         assert(i < count);
-        assert(tokens[i].kind == -12, "Missing end keyword"); // end
+        assert(tokens[i].kind == -11, "Missing end keyword"); // end
         
         uint32_t cont_to = prog_i;
         compile_expr(source, tokens, count, expr_i, 0); // recompile test expr
@@ -543,7 +539,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         assert(token_is(source, tokens, count, i++, ":"));
         
         i += compile_statementlist(source, tokens, count, i);
-        assert(tokens[i++].kind == -12, "Missing end keyword");
+        assert(tokens[i++].kind == -11, "Missing end keyword");
         
         uint32_t cont_to = prog_i;
         prog_write5(INST_FOREND, id, idx, 0, 0);
@@ -596,25 +592,20 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         i += 1; // (
         
         uint16_t j = 0;
-        while (!token_is(source, tokens, count, i, ")"))
-        {
+        
+        PARSE_COMMALIST(")",
             size_t r = compile_expr(source, tokens, count, i, 0);
             if (r == 0) return 0;
-            assert(j++ < ARGLIMIT, "Too many arguments to function");
+            assert(j < ARGLIMIT, "Too many arguments to function");
             i += r;
-            
-            if (!(token_is(source, tokens, count, i, ")")
-                || token_is(source, tokens, count, i, ","))) return 0;
-            if (token_is(source, tokens, count, i, ",")) i++;
-        }
-        if (!token_is(source, tokens, count, i++, ")")) return 0;
+        )
         
         prog_write3(INST_FUNCCALL, id, j);
         
         prog_write(INST_DISCARD);
         return i - orig_i;
     }
-    else if (tokens[i].kind == -12 || tokens[i].kind == -3 || tokens[i].kind == -2) // end, elif, else
+    else if (tokens[i].kind == -11 || tokens[i].kind == -3 || tokens[i].kind == -2) // end, elif, else
         return i - orig_i;
     else if (token_is(source, tokens, count, i, "\n") || token_is(source, tokens, count, i, ";"))
         return 1;
@@ -690,17 +681,14 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
     if (!token_is(source, tokens, count, i++, "(")) return 0;
     uint16_t args[ARGLIMIT];
     uint32_t j = 0;
-    while (1)
-    {
-        if (token_is(source, tokens, count, i, ")")) { i += 1; break; }
+    
+    PARSE_COMMALIST(")",
         if (tokens[i].kind >= MIN_KEYWORD) return 0;
         assert(j < ARGLIMIT);
-        args[j++] = lex_ident_offset - tokens[i++].kind;
-        locals_registered[args[j - 1]] = 1;
-        if (!(token_is(source, tokens, count, i, ")")
-              || token_is(source, tokens, count, i, ","))) return 0;
-        if (token_is(source, tokens, count, i, ",")) i++;
-    }
+        args[j] = lex_ident_offset - tokens[i++].kind;
+        locals_registered[args[j]] = 1;
+    )
+    
     if (!token_is(source, tokens, count, i++, ":")) return 0;
     
     prog_write3(INST_FUNCDEF, 0, 0);
@@ -737,7 +725,7 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
             assert(r != 0, "Incomplete function");
             i += r + 1;
             
-            assert(tokens[i++].kind == -12, "Missing end keyword");
+            assert(tokens[i++].kind == -11, "Missing end keyword");
         }
         else if ((r = compile_statement(source, tokens, count, i)))
             i += r;
