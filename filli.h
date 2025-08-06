@@ -353,8 +353,7 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
     if (i >= count) return 0;
     if (token_is(source, tokens, count, i, "lambda"))
     {
-        size_t orig_i = i;
-        i += 1;
+        size_t orig_i = i++;
         
         if (!token_is(source, tokens, count, i++, "[")) return 0;
         int16_t * caps = (int16_t *)zalloc(sizeof(int16_t) * CAPTURELIMIT);
@@ -362,22 +361,17 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
         PARSE_COMMALIST("]", return 0, return 0, assert(j < CAPTURELIMIT),
             if (tokens[i].kind >= MIN_KEYWORD) return 0;
             int16_t id = lex_ident_offset - tokens[i++].kind;
-            if (func_depth > 0 && locals_registered[id])
-            {
-                caps[j] = id;
-                caps_registered_next[id] = j + 1;
-            }
-            else if (func_depth > 0 && caps_registered[id])
-            {
-                caps[j] = -caps_registered[id];
-                caps_registered_next[id] = j + 1;
-            }
-            else
+            int64_t accessor_id = ~0LL;
+            if (func_depth > 0 && locals_registered[id])    accessor_id = id;
+            else if (func_depth > 0 && caps_registered[id]) accessor_id = -caps_registered[id];
+            if (accessor_id == ~0LL)
             {
                 printsn(source + tokens[i - 1].i, tokens[i - 1].len);
                 prints("\n");
                 panic("Unable to capture identifier");
             }
+            caps[j] = accessor_id;
+            caps_registered_next[id] = j + 1;
         )
         
         func_start();
@@ -510,7 +504,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
             skips[skip_i++] = prog_i - 2;
             assert(skip_i < ELIFLIMIT-1, "Too many elifs in if-else chain");
             
-            if (tokens[i].kind == -3)
+            if (tokens[i].kind == -3) // elif
             {
                 i += compile_expr(source, tokens, count, i + 1, 0) + 1;
                 assert(token_is(source, tokens, count, i++, ":"));
@@ -532,9 +526,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         assert(tokens[i].kind == -11, "Missing end keyword");
         uint32_t real_end = prog_i;
         while (skip_i > 0) memcpy(program + skips[--skip_i], &real_end, 4);
-        i += 1;
-        
-        return i - orig_i;
+        return i + 1 - orig_i;
     }
     if (tokens[i].kind == -5) // while
     {
@@ -560,14 +552,13 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         
         uint32_t end = prog_i;
         memcpy(program + skip_at, &end, 4);
-        i += 1;
         
         uint32_t break_to = prog_i;
         while (loop_break_i > loop_break_base) memcpy(program + loop_breaks[--loop_break_i], &break_to, 4);
         while (loop_cont_i  > loop_cont_base ) memcpy(program + loop_conts [--loop_cont_i ], &cont_to , 4);
         loop_nesting--;
         
-        return i - orig_i;
+        return i + 1- orig_i;
     }
     else if (token_is(source, tokens, count, i, "let"))
     {
@@ -889,14 +880,13 @@ uint64_t val_hash(Value * v)
 // newcap must be a power of 2
 void dict_reallocate(Dict * d, size_t newcap)
 {
-    size_t mask = newcap - 1;
     BiValue * newbuf = zalloc(sizeof(BiValue) * newcap);
     for (size_t i = 0; i < newcap; i++)
         newbuf[i] = (BiValue) { val_tagged(VALUE_INVALID), val_tagged(VALUE_INVALID) };
     for (size_t i = 0; i < d->cap; i++)
     {
-        uint64_t hash = val_hash(&d->buf[i].l) & mask;
-        while (newbuf[hash].l.tag == VALUE_INVALID) hash = (hash + 1) & mask;
+        uint64_t hash = val_hash(&d->buf[i].l) & (newcap - 1);
+        while (newbuf[hash].l.tag == VALUE_INVALID) hash = (hash + 1) & (newcap - 1);
         newbuf[hash] = (BiValue) { d->buf[i].l, d->buf[i].r };
     }
     d->cap = newcap;
@@ -908,10 +898,8 @@ Value * dict_get_or_insert(Dict * d, Value * v)
     // max 50% load factor
     if (d->len * 2 > d->cap) dict_reallocate(d, d->cap * 2);
     
-    size_t mask = d->cap - 1;
-    
-    uint64_t hash = val_hash(v) & mask;
-    while (val_eq(v, &d->buf[hash].l)) hash = (hash + 1) & mask;
+    uint64_t hash = val_hash(v) & (d->cap - 1);
+    while (val_eq(v, &d->buf[hash].l)) hash = (hash + 1) & (d->cap - 1);
     if (d->buf[hash].r.tag == VALUE_INVALID) 
     {
         d->len++;
