@@ -2,10 +2,14 @@
 #define FILLI_H_INCLUDED
 
 #define IDENTIFIER_COUNT 32000
-#define FRAME_VARCOUNT 1024
-#define FRAME_STACKSIZE 1024
+#define FRAME_VARCOUNT 1024 // increases memory usage of stack frames
+#define FRAME_STACKSIZE 1024 // increases memory usage of stack frames
 #define PROGRAM_MAXLEN 100000 // default max length of program
-#define FORLOOP_COUNT_LIMIT 255
+#define FORLOOP_COUNT_LIMIT 255 // increases memory usage of stack frames
+#define ARGLIMIT 255 // affects risk of stack smashing during compilation
+#define ELIFLIMIT 255 // affects risk of stack smashing during compilation
+
+// OTHER LIMITS
 
 // micro stdlib replacement stuff to reduce binary size (yes, this has a big effect)
 
@@ -107,7 +111,6 @@ void lex_init(void)
     insert_or_lookup_id("let", 3);       // 10
     insert_or_lookup_id("begin", 3);     // 11
     insert_or_lookup_id("end", 3);       // 12
-    insert_or_lookup_id("null", 4);      // 13
     lex_ident_offset = highest_ident_id;
 }
 #define MIN_KEYWORD -13
@@ -116,7 +119,7 @@ Token * tokenize(const char * src, size_t * count)
 {
     int newline_is_token = 1;
     
-    const char * long_punctuation[] = { "==", "!=", ">=", "<=", "+=", "-=", "*=", "/=" };
+    const char * long_punctuation[] = { "==", "!=", ">=", "<=", "+=", "-=", "*=", "/=", "{}" };
     
     size_t len = strlen(src);
     
@@ -193,6 +196,7 @@ enum {
     INST_INVALID,
     // zero-op
     INST_DISCARD = 0x100,
+    PUSH_NULL, PUSH_DICT_EMPTY,
     INST_RETURN_VAL, INST_RETURN_VOID,
     INST_ADD, INST_SUB, INST_MUL, INST_DIV,
     INST_CMP_EQ, INST_CMP_NE, INST_CMP_GT, INST_CMP_LT, INST_CMP_GE, INST_CMP_LE,
@@ -276,12 +280,21 @@ uint8_t for_loop_index = 0;
 size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t i)
 {
     if (i >= count) return 0;
+    
+    if (token_is(source, tokens, count, i, "{}")) return prog_write(PUSH_DICT_EMPTY), 1;
+    
     if (tokens[i].kind > 1) return 0;
     if (tokens[i].kind < 0 && tokens[i].kind >= MIN_KEYWORD) return 0;
     
     if (tokens[i].kind < 0)
     {
-        if (!in_global && locals_registered[lex_ident_offset-tokens[i].kind])
+        if (token_is(source, tokens, count, i, "true"))
+            return prog_write5(PUSH_NUM, 0, 0, 0, 0x3FF0), 1;
+        else if (token_is(source, tokens, count, i, "false"))
+            return prog_write5(PUSH_NUM, 0, 0, 0, 0), 1;
+        else if (token_is(source, tokens, count, i, "null"))
+            return prog_write(PUSH_NULL), 1;
+        else if (!in_global && locals_registered[lex_ident_offset-tokens[i].kind])
             prog_write(PUSH_LOCAL);
         else if (globals_registered[lex_ident_offset-tokens[i].kind])
             prog_write(PUSH_GLOBAL);
@@ -395,7 +408,7 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
         {
             size_t r = compile_expr(source, tokens, count, i, 0);
             if (r == 0) return 0;
-            assert(j++ < 256, "Too many arguments to function (limit is 256)");
+            assert(j++ < ARGLIMIT, "Too many arguments to function");
             i += r;
             
             if (!(token_is(source, tokens, count, i, ")") || token_is(source, tokens, count, i, ",")))
@@ -458,7 +471,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         uint32_t end = prog_i + ((tokens[i].kind == -3 || tokens[i].kind == -2) ? 3 : 0);
         memcpy(program + jump_at, &end, 4);
         
-        uint32_t skips[256] = {};
+        uint32_t skips[ELIFLIMIT] = {};
         size_t skip_i = 0;
         
         while (tokens[i].kind == -3 || tokens[i].kind == -2) // elif, else
@@ -466,6 +479,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
             // add on to previous block: skip this and the rest of the blocks
             prog_write3(INST_JMP, 0, 0);
             skips[skip_i++] = prog_i - 2;
+            assert(skip_i < ELIFLIMIT-1, "Too many elifs in if-else chain");
             
             if (tokens[i].kind == -3)
             {
@@ -555,7 +569,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         else           locals_registered[id] = 1;
         assert(token_is(source, tokens, count, i++, "in"));
         uint16_t idx = for_loop_index++;
-        assert(idx < FORLOOP_COUNT_LIMIT, "Too many for loops (max 256 per function or in root scope)")
+        assert(idx < FORLOOP_COUNT_LIMIT, "Too many for loops")
         
         size_t ret = compile_expr(source, tokens, count, i, 0);
         assert(ret > 0, "For loop requires valid expression")
@@ -625,7 +639,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         {
             size_t r = compile_expr(source, tokens, count, i, 0);
             if (r == 0) return 0;
-            assert(j++ < 256, "Too many arguments to function (limit is 256)");
+            assert(j++ < ARGLIMIT, "Too many arguments to function");
             i += r;
             
             if (!(token_is(source, tokens, count, i, ")")
@@ -713,13 +727,13 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
     if (tokens[i].kind >= MIN_KEYWORD) return 0;
     int16_t id = lex_ident_offset - tokens[i++].kind;
     if (!token_is(source, tokens, count, i++, "(")) return 0;
-    uint16_t args[256]; // at most 256 args per function
+    uint16_t args[ARGLIMIT];
     uint32_t j = 0;
     while (1)
     {
         if (token_is(source, tokens, count, i, ")")) { i += 1; break; }
         if (tokens[i].kind >= MIN_KEYWORD) return 0;
-        assert(j < 256);
+        assert(j < ARGLIMIT);
         args[j++] = lex_ident_offset - tokens[i++].kind;
         locals_registered[args[j - 1]] = 1;
         if (!(token_is(source, tokens, count, i, ")")
@@ -779,20 +793,93 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
 }
 
 struct _Value;
+struct _BiValue;
 typedef struct _Array { struct _Value * buf; size_t len; size_t cap; } Array;
+typedef struct _Dict { struct _BiValue * buf; size_t len; size_t cap; } Dict;
 
-enum { VALUE_FLOAT, VALUE_ARRAY, VALUE_STRING, VALUE_FUNC, VALUE_NULL }; // tag
+// tag
+enum { VALUE_INVALID, VALUE_FLOAT, VALUE_ARRAY, VALUE_DICT, VALUE_STRING, VALUE_FUNC, VALUE_NULL };
 
 typedef struct _Value {
-    union { double f; Array * a; char * s; Funcdef * fn; } u;
+    union { double f; Array * a; Dict * d; char * s; Funcdef * fn; } u;
     uint8_t tag;
 } Value;
+typedef struct _BiValue { struct _Value l; struct _Value r; } BiValue;
+
+Value val_tagged(uint8_t tag) { Value v; memset(&v, 0, sizeof(Value)); v.tag = tag; return v; }
+Value val_float(double f) { Value v = val_tagged(VALUE_FLOAT); v.u.f = f; return v; }
+Value val_string(char * s) { Value v = val_tagged(VALUE_STRING); v.u.s = s; return v; }
+Value val_func(uint16_t id) { Value v = val_tagged(VALUE_FUNC); v.u.fn = &funcs_registered[id]; return v; }
 
 Value * array_get(Array * a, size_t i) { assert(i < a->len); return a->buf + i; }
 
-Value val_float(double f) { Value v; v.tag = VALUE_FLOAT; v.u.f = f; return v; }
-Value val_string(char * s) { Value v; v.tag = VALUE_STRING; v.u.s = s; return v; }
-Value val_func(uint16_t id) { Value v; v.tag = VALUE_FUNC; v.u.fn = &funcs_registered[id]; return v; }
+// used by hashmap, not comparisons
+uint8_t val_eq(Value * a, Value * b)
+{
+    if (a->tag != b->tag) return 0;
+    if (a->tag == VALUE_FLOAT) return a->u.f == b->u.f || (a->u.f != a->u.f && b->u.f != b->u.f);
+    if (a->tag == VALUE_STRING) return strcmp(a->u.s, b->u.s) == 0;
+    if (a->tag == VALUE_FUNC) return a->u.fn == b->u.fn;
+    return 0;
+}
+
+uint64_t val_hash(Value * v)
+{
+    assert(v->tag == VALUE_STRING || v->tag == VALUE_FLOAT || v->tag == VALUE_FUNC || v->tag == VALUE_NULL,
+           "Tried to use an unhashable type (dict or array) as a dict key");
+    uint64_t hash = 0;
+    uint64_t hv = 0xf1357aea2e62a9c5;
+    
+    hash = (hash + v->tag) * hv;
+    if (v->tag == VALUE_FLOAT)
+    {
+        uint64_t n = 0;
+        memcpy(&n, &v->u.f, 8);
+        hash = (hash + n) * hv;
+    }
+    else if (v->tag == VALUE_STRING)
+        for (size_t i = 0; v->u.s[i] != 0; i++) hash = (hash + v->u.s[i]) * hv;
+    else if (v->tag == VALUE_FUNC)
+        hash = (hash + v->u.fn->id) * hv;
+    
+    return hash ^ (hash >> 6);
+}
+
+// newcap must be a power of 2
+void dict_reallocate(Dict * d, size_t newcap)
+{
+    size_t mask = newcap - 1;
+    BiValue * newbuf = malloc(sizeof(BiValue) * newcap);
+    memset(newbuf, 0, sizeof(BiValue) * newcap);
+    for (size_t i = 0; i < d->len; i++)
+    {
+        Value * l = &d->buf[i].l;
+        Value * r = &d->buf[i].r;
+        uint64_t hash = val_hash(l) & mask;
+        while (newbuf[hash].l.tag == VALUE_INVALID) hash = (hash + 1) & mask;
+        newbuf[hash].l = *l;
+        newbuf[hash].r = *r;
+    }
+    d->cap = newcap;
+    d->buf = newbuf;
+}
+Value * dict_get_or_insert(Dict * d, Value * v)
+{
+    if (d->cap == 0) dict_reallocate(d, 64);
+    // max 50% load factor
+    if (d->len * 2 > d->cap) dict_reallocate(d, d->cap * 2);
+    
+    size_t mask = d->cap - 1;
+    
+    uint64_t hash = val_hash(v) & mask;
+    while (val_eq(v, &d->buf[hash].l)) hash = (hash + 1) & mask;
+    if (d->buf[hash].r.tag == VALUE_INVALID) 
+    {
+        d->len++;
+        d->buf[hash].r = val_tagged(VALUE_NULL);
+    }
+    return &d->buf[hash].r;
+}
 
 uint8_t val_truthy(Value v)
 {
@@ -858,8 +945,7 @@ void interpret(void)
         
         NEXT_CASE(INST_ARRAY_LITERAL)
             uint16_t itemcount = program[frame->pc + 1];
-            Value v;
-            v.tag = VALUE_ARRAY;
+            Value v = val_tagged(VALUE_ARRAY);
             v.u.a = (Array *)malloc(sizeof(Array));
             v.u.a->buf = (Value *)malloc(sizeof(Value) * itemcount);
             v.u.a->len = itemcount;
@@ -918,6 +1004,14 @@ void interpret(void)
             frame->stack[frame->stackpos++] = val_float(0.0);
             assert(frame->stackpos < FRAME_STACKSIZE);
             continue;
+        
+        NEXT_CASE(PUSH_NULL)
+            frame->stack[frame->stackpos++] = val_tagged(VALUE_NULL);
+        
+        NEXT_CASE(PUSH_DICT_EMPTY)
+            memset(&frame->stack[frame->stackpos], 0, sizeof(Value));
+            frame->stack[frame->stackpos].tag = VALUE_DICT;
+            frame->stack[frame->stackpos++].u.d = (Dict *)malloc(sizeof(Dict));
         
         NEXT_CASE(PUSH_NUM)
             double f;
@@ -1078,20 +1172,25 @@ void interpret(void)
         #define INDEX_SHARED(STR_VALID_OP)\
             Value v2 = frame->stack[--frame->stackpos];\
             Value v1 = frame->stack[--frame->stackpos];\
-            assert(v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY);\
+            assert(v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY || v1.tag == VALUE_DICT);\
             if (v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY)\
                 assert(v2.tag == VALUE_FLOAT);\
+            if (v1.tag == VALUE_DICT)\
+                assert(v2.tag == VALUE_FLOAT || v2.tag == VALUE_STRING\
+                       || v2.tag == VALUE_FUNC || v2.tag == VALUE_NULL);\
             if (v1.tag == VALUE_STRING)\
                 assert(((size_t)v2.u.f) STR_VALID_OP strlen(v1.u.s));
     
         NEXT_CASE(INST_INDEX)    INDEX_SHARED(<=)
             if (v1.tag == VALUE_STRING) v1.u.s = stringdupn(v1.u.s + (size_t)v2.u.f, 1);
             if (v1.tag == VALUE_ARRAY)  v1 = *array_get(v1.u.a, v2.u.f);
+            if (v1.tag == VALUE_DICT)   v1 = *dict_get_or_insert(v1.u.d, &v2);
             frame->stack[frame->stackpos++] = v1;
         
         NEXT_CASE(INST_INDEX_ADDR)    INDEX_SHARED(<)
             if (v1.tag == VALUE_STRING) frame->assign_target_char = v1.u.s + (size_t)v2.u.f;
             if (v1.tag == VALUE_ARRAY)  frame->assign_target_agg = array_get(v1.u.a, v2.u.f);
+            if (v1.tag == VALUE_DICT)   frame->assign_target_agg = dict_get_or_insert(v1.u.d, &v2);
         
         END_CASE()
         DECAULT_CASE()

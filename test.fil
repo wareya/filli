@@ -72,3 +72,13 @@ print(string)
 string[6] = "_"
 print(string)
 
+let dict = {}
+
+print(dict)
+print(dict["a"])
+dict["a"] = 429.351293;
+print(dict["a"])
+
+print(true)
+print(false)
+print(null)

@@ -12,6 +12,9 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
             if      (tag == VALUE_FLOAT)    prints(baddtostr(frame->stack[frame->stackpos - 1 - i].u.f));
             else if (tag == VALUE_STRING)   prints(frame->stack[frame->stackpos - 1 - i].u.s);
             else if (tag == VALUE_ARRAY)    prints("<array>");
+            else if (tag == VALUE_DICT)     prints("<dict>");
+            else if (tag == VALUE_FUNC)     prints("<func>");
+            else if (tag == VALUE_NULL)     prints("null");
             
             if (i + 1 < argcount) prints(" ");
         }
