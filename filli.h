@@ -14,6 +14,7 @@
 #define ARGLIMIT 255 // affects risk of stack smashing during compilation
 #define ELIFLIMIT 255 // affects risk of stack smashing during compilation
 #define CAPTURELIMIT 255
+#define LAMBDA_COUNT 4096
 
 // OTHER LIMITS
 
@@ -79,9 +80,10 @@ void lex_init(void)
     insert_or_lookup_id("return", 6);    // 9
     insert_or_lookup_id("let", 3);       // 10
     insert_or_lookup_id("end", 3);       // 11
+    insert_or_lookup_id("lambda", 3);    // 12
     lex_ident_offset = highest_ident_id;
 }
-#define MIN_KEYWORD -11
+#define MIN_KEYWORD -12
 
 Token * tokenize(const char * src, size_t * count)
 {
@@ -183,6 +185,7 @@ enum {
     PUSH_NUM = 0x560, // f64
     INST_FOREND, // var id (2), for slot (2), destination (4)
     INST_FORSTART, // var id (2), for slot (2), destination(4) (needed if loop val is 0)
+    INST_LAMBDA,
 };
 
 // TODO: make non-global
@@ -228,8 +231,9 @@ typedef struct _Funcdef {
 const char * compiled_strings[1<<16] = {};
 uint16_t compiled_string_i = 0;
 
-uint8_t in_global = 1;
-Funcdef funcs_registered[IDENTIFIER_COUNT] = {};
+uint8_t func_depth = 0;
+Funcdef funcs_registered[IDENTIFIER_COUNT + LAMBDA_COUNT] = {};
+uint32_t lambda_id = IDENTIFIER_COUNT;
 uint8_t globals_registered[IDENTIFIER_COUNT] = {};
 
 uint8_t * locals_registered;
@@ -256,7 +260,7 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
             return prog_write5(PUSH_NUM, 0, 0, 0, 0), 1;
         else if (token_is(source, tokens, count, i, "null"))
             return prog_write(PUSH_NULL), 1;
-        else if (!in_global && locals_registered[lex_ident_offset-tokens[i].kind])
+        else if (func_depth > 0 && locals_registered[lex_ident_offset-tokens[i].kind])
             prog_write(PUSH_LOCAL);
         else if (globals_registered[lex_ident_offset-tokens[i].kind])
             prog_write(PUSH_GLOBAL);
@@ -302,11 +306,9 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
     return 1;
 }
 
-#define PARSE_COMMALIST(END, BREAK, BREAK2, LIMITER, HANDLE)\
+#define PARSE_COMMALIST(END, BREAK, BREAK2, LIMITER, HANDLER)\
     while (!token_is(source, tokens, count, i, END)) {\
-        LIMITER;\
-        HANDLE;\
-        j += 1;\
+        LIMITER; HANDLER; j += 1;\
         if (!(token_is(source, tokens, count, i, END) || token_is(source, tokens, count, i, ","))) BREAK;\
         if (token_is(source, tokens, count, i, ",")) i++;\
     }\
@@ -315,11 +317,26 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
 size_t compile_expr(const char * source, Token * tokens, size_t count, size_t i, int right_bind_power);
 size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t i);
 
+void func_start(void)
+{
+    func_depth += 1;
+    locals_reg_stack[locals_reg_i++] = locals_registered;
+    locals_registered = malloc(IDENTIFIER_COUNT);
+}
+void func_end(void)
+{
+    free(locals_registered);
+    locals_registered = locals_reg_stack[--locals_reg_i];
+    func_depth -= 1;
+}
+size_t compile_lambda(const char * source, Token * tokens, size_t count, size_t i);
+
 size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size_t i)
 {
     if (i >= count) return 0;
     if (token_is(source, tokens, count, i, "lambda"))
     {
+        size_t orig_i = i;
         i += 1;
         if (!token_is(source, tokens, count, i++, "[")) return 0;
         uint16_t caps[CAPTURELIMIT];
@@ -329,17 +346,14 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
             caps[j] = lex_ident_offset - tokens[i++].kind;
             locals_registered[caps[j]] = 1;
         )
-        uint32_t capcount = j; (void)capcount;
         
-        if (!token_is(source, tokens, count, i++, "(")) return 0;
-        uint16_t args[ARGLIMIT];
-        j = 0;
-        PARSE_COMMALIST(")", return 0, return 0, assert(j < ARGLIMIT),
-            if (tokens[i].kind >= MIN_KEYWORD) return 0;
-            args[j] = lex_ident_offset - tokens[i++].kind;
-            locals_registered[args[j]] = 1;
-        )
+        func_start();
+        size_t r = compile_lambda(source, tokens, count, i);
+        func_end();
         
+        if (r == 0) return 0;
+        
+        return i + r - orig_i;
     }
     if (token_is(source, tokens, count, i, "(")) // wrapped expr
     {
@@ -527,15 +541,15 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         if (++i >= count) return 0;
         int16_t id = lex_ident_offset - tokens[i++].kind;
         
-        if (in_global) globals_registered[id] = 1;
-        else           locals_registered[id] = 1;
+        if (func_depth == 0) globals_registered[id] = 1;
+        else                 locals_registered [id] = 1;
         
         if (token_is(source, tokens, count, i, "="))
         {
             size_t r = compile_expr(source, tokens, count, i + 1, 0);
             if (!r) return i - orig_i;
             i += r + 1;
-            prog_write2(INST_ASSIGN + in_global, id);
+            prog_write2(INST_ASSIGN + (func_depth == 0), id);
         }
         return i - orig_i;
     }
@@ -548,8 +562,8 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         size_t loop_break_base = loop_break_i;
         
         int16_t id = lex_ident_offset - tokens[i++].kind;
-        if (in_global) globals_registered[id] = 1;
-        else           locals_registered[id] = 1;
+        if (func_depth == 0) globals_registered[id] = 1;
+        else                 locals_registered[id] = 1;
         assert(token_is(source, tokens, count, i++, "in"));
         uint16_t idx = for_loop_index++;
         assert(idx < FORLOOP_COUNT_LIMIT, "Too many for loops")
@@ -597,7 +611,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         i += ret;
         
         uint8_t is_global;
-        if (!in_global && locals_registered[id]) is_global = 0;
+        if (func_depth > 0 && locals_registered[id]) is_global = 0;
         else if (globals_registered[id]) is_global = 1;
         else panic("Unknown variable");
         
@@ -697,6 +711,34 @@ size_t compile_statementlist(const char * source, Token * tokens, size_t count, 
     }
     return i - orig_i;
 }
+
+
+size_t compile_register_func(const char * source, Token * tokens, size_t count, uint16_t id, uint32_t i)
+{
+    size_t orig_i = i;
+    
+    if (!token_is(source, tokens, count, i++, "(")) panic("Invalid funcdef")
+    uint16_t args[ARGLIMIT];
+    uint32_t j = 0;
+    PARSE_COMMALIST(")", panic("Invalid funcdef"), panic("Invalid funcdef"), assert(j < ARGLIMIT),
+        if (tokens[i].kind >= MIN_KEYWORD) panic("Invalid funcdef");
+        args[j] = lex_ident_offset - tokens[i++].kind;
+        locals_registered[args[j]] = 1;
+    )
+    if (!token_is(source, tokens, count, i++, ":")) panic("Invalid funcdef");
+    
+    funcs_registered[id] = (Funcdef) {1, 0, j, id, prog_i, 0};
+    if (j > 0)
+    {
+        funcs_registered[id].args = (uint16_t *)malloc(sizeof(uint16_t)*j);
+        memcpy(funcs_registered[id].args, args, j * sizeof(uint16_t));
+    }
+    
+    i += compile_statementlist(source, tokens, count, i);
+    assert(tokens[i++].kind == -11, "Missing end keyword");
+    return i - orig_i;
+}
+
 size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
 {
     size_t orig_i = i;
@@ -704,51 +746,31 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
     if (tokens[i].kind >= MIN_KEYWORD) return 0;
     int16_t id = lex_ident_offset - tokens[i++].kind;
     
-    if (!token_is(source, tokens, count, i++, "(")) return 0;
-    uint16_t args[ARGLIMIT];
-    uint32_t j = 0;
-    PARSE_COMMALIST(")", return 0, return 0, assert(j < ARGLIMIT),
-        if (tokens[i].kind >= MIN_KEYWORD) return 0;
-        args[j] = lex_ident_offset - tokens[i++].kind;
-        locals_registered[args[j]] = 1;
-    )
-    
-    if (!token_is(source, tokens, count, i++, ":")) return 0;
-    
     prog_write3(INST_FUNCDEF, 0, 0);
     size_t len_offs = prog_i - 2;
     
-    funcs_registered[id].exists = 1;
-    funcs_registered[id].argcount = j;
-    funcs_registered[id].id = id;
-    funcs_registered[id].loc = prog_i;
-    if (j > 0)
-    {
-        funcs_registered[id].args = (uint16_t *)malloc(sizeof(uint16_t)*j);
-        memcpy(funcs_registered[id].args, &args, j * sizeof(uint16_t));
-    }
+    i += compile_register_func(source, tokens, count, id, i);
     
-    i += compile_statementlist(source, tokens, count, i);
     memcpy(program + len_offs, &prog_i, 4);
     
     return i - orig_i;
 }
-size_t compile_func_w(const char * source, Token * tokens, size_t count, size_t i)
+size_t compile_lambda(const char * source, Token * tokens, size_t count, size_t i)
 {
-    in_global = 0;
+    size_t orig_i = i;
+    if (i >= count) return 0;
     
-    locals_reg_stack[locals_reg_i++] = locals_registered;
-    locals_registered = malloc(IDENTIFIER_COUNT);
-
-    size_t r = compile_func(source, tokens, count, i);
+    prog_write5(INST_LAMBDA, 0, 0, 0, 0);
+    size_t id_offs = prog_i - 4;
     
-    free(locals_registered);
-    locals_registered = locals_reg_stack[--locals_reg_i];
+    uint32_t id = lambda_id++;
+    i += compile_register_func(source, tokens, count, id, i);
     
-    in_global = 1;
-    return r;
+    memcpy(program + id_offs, &id, 4);
+    memcpy(program + id_offs + 2, &prog_i, 4);
+    
+    return i - orig_i;
 }
-
 size_t compile(const char * source, Token * tokens, size_t count, size_t i)
 {
     size_t orig_i = i;
@@ -757,11 +779,11 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
         size_t r;
         if (tokens[i].kind == -4) // func
         {
-            r = compile_func_w(source, tokens, count, i+1);
+            func_start();
+            r = compile_func(source, tokens, count, i+1);
+            func_end();
             assert(r != 0, "Incomplete function");
             i += r + 1;
-            
-            assert(tokens[i++].kind == -11, "Missing end keyword");
         }
         else if ((r = compile_statement(source, tokens, count, i)))
             i += r;
