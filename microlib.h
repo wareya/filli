@@ -3,12 +3,48 @@
 
 // micro stdlib replacement stuff to reduce binary size (yes, this has a big effect)
 
+// #define just_die() abort()
+//      literally just die. don't print anything.
+// #define die_now(X)
+//      die with diagnostic information about the death location (e.g. __LINE__)
+// #define assert(X, ...)
+//      assert on untruth of X, but print ... instead of X if it's passed
+// #define perror(X)
+//      as though eprints(X)
+// #define panic(...)
+//      as though die_now(__VA_OPT__( __VA_ARGS__))
+
+// char * stringdupn(const char * s, size_t len);
+//      return a malloc-allocated copy of s, stopping at len
+//      null terminated. stops at any null byte.
+// char * stringdup(const char * s);
+//      return a malloc-allocated copy of s
+//      null terminated
+
+// void prints(const char * s);
+//      dump every character in s to stdout
+// void eprints(const char * s);
+//      dump every character in s to stderr
+// void printu16hex(uint16_t x);
+//      stdout print the given short as if with "%04X", no trailing newline
+// void printsn(const char * s, size_t len);
+//      stdout print the first n characters from s, stopping at any 0 bytes, no trailing newline
+// double badstrtod(const char * s);
+//      parse the given string as a 64-bit float, silently stopping wherever it stops looking like a float
+//      does not need to be accurate
+// const char * baddtostr(double f);
+//      return a malloc-allocated string containing something similar to sprintf %f
+//      does not need to be accurate
+
 #define STRINGIZE2(x) #x
 #define STRINGIZE(x) STRINGIZE2(x)
 #define LINE_STRING STRINGIZE(__LINE__)
 
 #define just_die() abort()
 #define die_now(X) { prints("Assert:\n" #X "\non " LINE_STRING " in " __FILE__ "\n"); fflush(stdout); just_die(); }
+#ifdef assert
+    #undef assert
+#endif
 #define assert(X, ...) { if (!(X)) { if (__VA_OPT__(1)+0) die_now(__VA_ARGS__) else die_now(X) } }
 #define perror(X) eprints(X)
 #define panic(...) die_now(__VA_OPT__( __VA_ARGS__))

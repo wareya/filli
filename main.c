@@ -3,7 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef NO_GC
 #define USE_GC
+#endif
 
 #ifdef USE_GC
 #include <gc.h>

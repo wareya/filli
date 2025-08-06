@@ -11,42 +11,9 @@
 
 // OTHER LIMITS
 
-// micro stdlib replacement stuff to reduce binary size (yes, this has a big effect)
-
+// this library just does stuff that the stdlib does but with less stdlib involvement
+// why? smaller statically linked (e.g. musl) binaries. yes, the difference is significant!
 #include "microlib.h"
-
-// #define just_die() abort()
-//      literally just die. don't print anything.
-// #define die_now(X)
-//      die with diagnostic information about the death location (e.g. __LINE__)
-// #define assert(X, ...)
-//      assert on untruth of X, but print ... instead of X if it's passed
-// #define perror(X)
-//      as though eprints(X)
-// #define panic(...)
-//      as though die_now(__VA_OPT__( __VA_ARGS__))
-
-// char * stringdupn(const char * s, size_t len);
-//      return a malloc-allocated copy of s, stopping at len
-//      null terminated. stops at any null byte.
-// char * stringdup(const char * s);
-//      return a malloc-allocated copy of s
-//      null terminated
-
-// void prints(const char * s);
-//      dump every character in s to stdout
-// void eprints(const char * s);
-//      dump every character in s to stderr
-// void printu16hex(uint16_t x);
-//      stdout print the given short as if with "%04X", no trailing newline
-// void printsn(const char * s, size_t len);
-//      stdout print the first n characters from s, stopping at any 0 bytes, no trailing newline
-// double badstrtod(const char * s);
-//      parse the given string as a 64-bit float, silently stopping wherever it stops looking like a float
-//      does not need to be accurate
-// const char * baddtostr(double f);
-//      return a malloc-allocated string containing something similar to sprintf %f
-//      does not need to be accurate
 
 // actual program
 
@@ -55,7 +22,7 @@ typedef struct _IdEntry { const char * where; uint16_t len; } IdEntry;
 int16_t highest_ident_id = 0;
 int16_t insert_or_lookup_id(const char * text, uint16_t len)
 {
-    // FIXME make non-static
+    // TODO: make non-static
     static IdEntry ids[IDENTIFIER_COUNT] = {};
     for (int16_t j = 1; j <= IDENTIFIER_COUNT; j++)
     {
@@ -88,11 +55,7 @@ int token_is(const char * source, Token * tokens, size_t count, size_t i, const 
     return strncmp(source + tokens[i].i, text, len) == 0;
 }
 
-Token mk_token(uint32_t i, uint16_t len, int16_t kind)
-{
-    Token t = {i, len, kind};
-    return t;
-}
+Token mk_token(uint32_t i, uint16_t len, int16_t kind) { Token t = {i, len, kind}; return t; }
 
 int lex_ident_offset = 0;
 
@@ -158,7 +121,7 @@ Token * tokenize(const char * src, size_t * count)
                    || src[i] == '_' || (src[i] >= '0' && src[i] <= '9'))
                 i++;
             
-            ret[t++] = mk_token(start_i, i-start_i, insert_or_lookup_id(src + start_i, i - start_i));
+            ret[t++] = mk_token(start_i, i - start_i, insert_or_lookup_id(src + start_i, i - start_i));
         }
         // tokenize strings
         else if (src[i] == '\'' || src[i] == '"')
@@ -200,6 +163,7 @@ enum {
     INST_RETURN_VAL, INST_RETURN_VOID,
     INST_ADD, INST_SUB, INST_MUL, INST_DIV,
     INST_CMP_EQ, INST_CMP_NE, INST_CMP_GT, INST_CMP_LT, INST_CMP_GE, INST_CMP_LE,
+    INST_CMP_AND, INST_CMP_OR,
     INST_INDEX,
     INST_INDEX_ADDR, INST_ASSIGN_ADDR,
     INST_ASSIGN_ADDR_ADD, INST_ASSIGN_ADDR_SUB, INST_ASSIGN_ADDR_MUL, INST_ASSIGN_ADDR_DIV,
@@ -226,7 +190,7 @@ enum {
     PUSH_NUM, // f64
 };
 
-// FIXME: make non-global
+// TODO: make non-global
 uint16_t * program = 0;
 uint32_t prog_capacity = PROGRAM_MAXLEN;
 void init_program() { program = malloc(sizeof(uint16_t) * prog_capacity); }
@@ -435,6 +399,8 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
     else if (token_is(source, tokens, count, i, "<=")) inst = INST_CMP_LE;
     else if (token_is(source, tokens, count, i, ">")) inst = INST_CMP_GT;
     else if (token_is(source, tokens, count, i, "<")) inst = INST_CMP_LT;
+    else if (token_is(source, tokens, count, i, "and")) inst = INST_CMP_AND;
+    else if (token_is(source, tokens, count, i, "or")) inst = INST_CMP_OR;
     else if (token_is(source, tokens, count, i, "["))
     {
         inst = INST_INDEX;
@@ -1056,6 +1022,11 @@ void interpret(void)
             frame->stack[frame->stackpos++] = val_float(v1.u.f * v2.u.f);
         NEXT_CASE(INST_DIV)    MATH_SHARED()
             frame->stack[frame->stackpos++] = val_float(v1.u.f / v2.u.f);
+        
+        NEXT_CASE(INST_CMP_AND)    MATH_SHARED()
+            frame->stack[frame->stackpos++] = val_float(!!(v1.u.f) && !!(v2.u.f));
+        NEXT_CASE(INST_CMP_OR)     MATH_SHARED()
+            frame->stack[frame->stackpos++] = val_float(!!(v1.u.f) || !!(v2.u.f));
         
         #define EQ_SHARED()\
             Value v2 = frame->stack[--frame->stackpos];\
