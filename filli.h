@@ -899,6 +899,10 @@ void interpret(void)
         NEXT_CASE(INST_DISCARD)     --frame->stackpos;
         NEXT_CASE(INST_FUNCDEF)     READ_AND_GOTO_TARGET(1)
         
+        #define STACK_PUSH(X)\
+            frame->stack[frame->stackpos++] = X;
+            assert(frame->stackpos < FRAME_STACKSIZE);
+        
         NEXT_CASE(INST_ARRAY_LITERAL)
             uint16_t itemcount = program[frame->pc + 1];
             Value v = val_tagged(VALUE_ARRAY);
@@ -907,8 +911,7 @@ void interpret(void)
             v.u.a->len = itemcount;
             v.u.a->cap = itemcount;
             while (itemcount > 0) v.u.a->buf[--itemcount] = frame->stack[--frame->stackpos];
-            frame->stack[frame->stackpos++] = v;
-            assert(frame->stackpos < FRAME_STACKSIZE);
+            STACK_PUSH(v)
         
         #define ENTER_FUNC()\
             assert(fn->exists);\
@@ -950,34 +953,31 @@ void interpret(void)
             Value v = frame->stack[--frame->stackpos];
             if (!frame->return_to) return;
             frame = frame->return_to;
-            frame->stack[frame->stackpos++] = v;
-            assert(frame->stackpos < FRAME_STACKSIZE);
+            STACK_PUSH(v)
             continue;
         
         NEXT_CASE(INST_RETURN_VOID)
             if (!frame->return_to) return;
             frame = frame->return_to;
-            frame->stack[frame->stackpos++] = val_float(0.0);
-            assert(frame->stackpos < FRAME_STACKSIZE);
+            STACK_PUSH(val_tagged(VALUE_NULL))
             continue;
         
         NEXT_CASE(PUSH_NULL)
-            frame->stack[frame->stackpos++] = val_tagged(VALUE_NULL);
+            STACK_PUSH(val_tagged(VALUE_NULL))
         
         NEXT_CASE(PUSH_DICT_EMPTY)
             memset(&frame->stack[frame->stackpos], 0, sizeof(Value));
-            frame->stack[frame->stackpos].tag = VALUE_DICT;
-            frame->stack[frame->stackpos++].u.d = (Dict *)malloc(sizeof(Dict));
+            Value v = val_tagged(VALUE_DICT);
+            v.u.d = (Dict *)malloc(sizeof(Dict));
+            STACK_PUSH(v)
         
         NEXT_CASE(PUSH_NUM)
             double f;
             memcpy(&f, program + frame->pc + 1, 8);
-            frame->stack[frame->stackpos++] = val_float(f);
-            assert(frame->stackpos < FRAME_STACKSIZE);
+            STACK_PUSH(val_float(f))
         NEXT_CASE(PUSH_GLOBAL)
             uint16_t id = program[frame->pc + 1];
-            frame->stack[frame->stackpos++] = global_frame->vars[id];
-            assert(frame->stackpos < FRAME_STACKSIZE);
+            STACK_PUSH(global_frame->vars[id])
         
         NEXT_CASE(INST_ASSIGN_GLOBAL)
             Value v = frame->stack[--frame->stackpos];
@@ -1059,16 +1059,13 @@ void interpret(void)
         NEXT_CASE(PUSH_STRING)
             uint16_t id = program[frame->pc + 1];
             char * s = stringdup(compiled_strings[id]);
-            frame->stack[frame->stackpos++] = val_string(s);
-            assert(frame->stackpos < FRAME_STACKSIZE);
+            STACK_PUSH(val_string(s))
         NEXT_CASE(PUSH_LOCAL)
             uint16_t id = program[frame->pc + 1];
-            frame->stack[frame->stackpos++] = frame->vars[id];
-            assert(frame->stackpos < FRAME_STACKSIZE);
+            STACK_PUSH(frame->vars[id])
         NEXT_CASE(PUSH_FUNCNAME)
             uint16_t id = program[frame->pc + 1];
-            frame->stack[frame->stackpos++] = val_func(id);
-            assert(frame->stackpos < FRAME_STACKSIZE);
+            STACK_PUSH(val_func(id))
         
         NEXT_CASE(INST_ASSIGN)
             Value v = frame->stack[--frame->stackpos];
