@@ -81,7 +81,7 @@ void lex_init(void)
     insert_or_lookup_id("end", 3);       // 12
     lex_ident_offset = highest_ident_id;
 }
-#define MIN_KEYWORD -13
+#define MIN_KEYWORD -12
 
 Token * tokenize(const char * src, size_t * count)
 {
