@@ -1,6 +1,11 @@
 #ifndef FILLI_H_INCLUDED
 #define FILLI_H_INCLUDED
 
+// INTEGRATION:
+// - include and link boehm GC and use #define to replace stdlib malloc/etc with boehm funcs
+// - rewrite intrinsics.h, adding whatever functionality you need (e.g. trig, array insert/delete/splice)
+// - skim microlib.h, consider replacing it with thin stdlib wrappers
+
 #define IDENTIFIER_COUNT 32000
 #define FRAME_VARCOUNT 1024 // increases memory usage of stack frames
 #define FRAME_STACKSIZE 1024 // increases memory usage of stack frames
@@ -170,7 +175,7 @@ enum {
     PUSH_LOCAL, PUSH_GLOBAL, INST_ASSIGN, INST_ASSIGN_GLOBAL,
     INST_ASSIGN_ADD, INST_ASSIGN_GLOBAL_ADD, INST_ASSIGN_SUB, INST_ASSIGN_GLOBAL_SUB,
     INST_ASSIGN_MUL, INST_ASSIGN_GLOBAL_MUL, INST_ASSIGN_DIV, INST_ASSIGN_GLOBAL_DIV,
-    INST_FUNCCALL_EXPR, INST_ARRAY_LITERAL, // arg count // item count
+    INST_FUNCCALL_REF, INST_ARRAY_LITERAL, // arg count // item count
     // 2-op
     INST_JMP = 0x340, INST_JMP_IF_FALSE, INST_JMP_IF_TRUE, // destination
     INST_FUNCDEF, INST_FUNCCALL, // skip destination // func id, arg count
@@ -371,7 +376,7 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
         }
         if (!token_is(source, tokens, count, i++, ")")) return 0;
         
-        prog_write2(INST_FUNCCALL_EXPR, j);
+        prog_write2(INST_FUNCCALL_REF, j);
         return i - orig_i;
     }
     
@@ -942,7 +947,7 @@ void interpret(void)
             Funcdef * fn = &funcs_registered[id];
             ENTER_FUNC()
         
-        NEXT_CASE(INST_FUNCCALL_EXPR)
+        NEXT_CASE(INST_FUNCCALL_REF)
             uint16_t argcount = program[frame->pc + 1];
             Value v_func = frame->stack[frame->stackpos - argcount - 1];
             assert(v_func.tag == VALUE_FUNC);
