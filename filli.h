@@ -22,6 +22,8 @@
 // why? smaller statically linked (e.g. musl) binaries. yes, the difference is significant!
 #include "microlib.h"
 
+void * zalloc(size_t s) { char * r = (char *)malloc(s); memset(r, 0, s); return r; }
+
 // actual program
 
 typedef struct _IdEntry { const char * where; uint16_t len; } IdEntry;
@@ -85,7 +87,7 @@ Token * tokenize(const char * src, size_t * count)
     
     size_t len = strlen(src);
     
-    Token * ret = (Token *)malloc(sizeof(Token) * len);
+    Token * ret = (Token *)zalloc(sizeof(Token) * len);
     size_t t = 0;
     
     for (size_t i = 0; i < len; )
@@ -157,36 +159,35 @@ Token * tokenize(const char * src, size_t * count)
 enum {
     INST_INVALID,
     // zero-op
-    INST_DISCARD = 0x100,
-    PUSH_NULL, PUSH_DICT_EMPTY,
-    INST_RETURN_VAL, INST_RETURN_VOID,
+    INST_DISCARD = 0x100, PUSH_NULL, PUSH_DICT_EMPTY, INST_RETURN_VAL, INST_RETURN_VOID,
     INST_ADD, INST_SUB, INST_MUL, INST_DIV, INST_CMP_AND, INST_CMP_OR,
     INST_CMP_EQ, INST_CMP_NE, INST_CMP_GT, INST_CMP_LT, INST_CMP_GE, INST_CMP_LE,
     INST_INDEX, INST_INDEX_ADDR, INST_SET_ADDR,
     INST_SET_ADDR_ADD, INST_SET_ADDR_SUB, INST_SET_ADDR_MUL, INST_SET_ADDR_DIV,
     // 1-op
-    PUSH_FUNCNAME = 0x220, PUSH_STRING, // id // table index
-    PUSH_LOCAL, PUSH_GLOBAL, PUSH_CAP,
-    INST_SET, INST_SET_GLOBAL, INST_SET_CAP,
+    PUSH_FUNCNAME = 0x220, INST_FUNCCALL_REF, PUSH_STRING, INST_ARRAY_LITERAL,
+    PUSH_LOCAL, PUSH_GLOBAL, PUSH_CAP, INST_SET, INST_SET_GLOBAL, INST_SET_CAP,
     INST_SET_ADD, INST_SET_GLOBAL_ADD, INST_SET_CAP_ADD,
     INST_SET_SUB, INST_SET_GLOBAL_SUB, INST_SET_CAP_SUB,
     INST_SET_MUL, INST_SET_GLOBAL_MUL, INST_SET_CAP_MUL,
     INST_SET_DIV, INST_SET_GLOBAL_DIV, INST_SET_CAP_DIV,
-    INST_FUNCCALL_REF, INST_ARRAY_LITERAL, // arg count // item count
     // 2-op
-    INST_JMP = 0x340, INST_JMP_IF_FALSE, INST_JMP_IF_TRUE, // destination
-    INST_FUNCDEF, INST_FUNCCALL, // skip destination // func id, arg count
+    INST_JMP = 0x340, INST_JMP_IF_FALSE, INST_JMP_IF_TRUE, INST_FUNCDEF, INST_FUNCCALL,
+    // jumps: destination
+    // INST_FUNCDEF: skip destination
+    // INST_FUNCCALL: func id, arg count
     // 4-op
-    PUSH_NUM = 0x560, // f64
-    INST_FOREND, // var id (2), for slot (2), destination (4)
-    INST_FORSTART, // var id (2), for slot (2), destination(4) (needed if loop val is 0)
-    INST_LAMBDA, // func id (4), destination(4)
+    PUSH_NUM = 0x560, INST_FOREND, INST_FORSTART, INST_LAMBDA, 
+    // PUSH_NUM: f64 (8)
+    // INST_FOREND: var id (2), for slot (2), destination (4)
+    // INST_FORSTART: var id (2), for slot (2), destination(4) (needed if loop val is 0)
+    // INST_LAMBDA: func id (4), destination(4)
 };
 
 // TODO: make non-global
 uint16_t * program = 0;
 uint32_t prog_capacity = PROGRAM_MAXLEN;
-void init_program() { program = malloc(sizeof(uint16_t) * prog_capacity); }
+void init_program() { program = zalloc(sizeof(uint16_t) * prog_capacity); }
 uint32_t prog_i = 0;
 
 void prog_write(uint16_t a) { program[prog_i++] = a; }
@@ -330,11 +331,9 @@ void func_start(void)
 {
     func_depth += 1;
     locals_reg_stack[locals_reg_i++] = locals_registered;
-    locals_registered = (uint8_t *)malloc(IDENTIFIER_COUNT);
-    memset(locals_registered, 0, IDENTIFIER_COUNT);
+    locals_registered = (uint8_t *)zalloc(IDENTIFIER_COUNT);
     caps_reg_stack[caps_reg_i++] = caps_registered;
-    caps_registered = (uint16_t *)malloc(sizeof(uint16_t) * IDENTIFIER_COUNT);
-    memset(caps_registered, 0, IDENTIFIER_COUNT);
+    caps_registered = (uint16_t *)zalloc(sizeof(uint16_t) * IDENTIFIER_COUNT);
 }
 void func_end(void)
 {
@@ -358,8 +357,8 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
         
         if (!token_is(source, tokens, count, i++, "[")) return 0;
         uint32_t j = 0;
-        int16_t * caps = (int16_t *)malloc(sizeof(int16_t) * CAPTURELIMIT);
-        uint16_t * caps_registered_next = (uint16_t *)malloc(sizeof(uint16_t) * IDENTIFIER_COUNT);
+        int16_t * caps = (int16_t *)zalloc(sizeof(int16_t) * CAPTURELIMIT);
+        uint16_t * caps_registered_next = (uint16_t *)zalloc(sizeof(uint16_t) * IDENTIFIER_COUNT);
         PARSE_COMMALIST("]", return 0, return 0, assert(j < CAPTURELIMIT),
             if (tokens[i].kind >= MIN_KEYWORD) return 0;
             int16_t id = lex_ident_offset - tokens[i++].kind;
@@ -525,8 +524,9 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
                 uint32_t end = prog_i + ((tokens[i].kind == -3 || tokens[i].kind == -2) ? 3 : 0);
                 memcpy(program + jump_at, &end, 4);
             }
-            else if (++i)
+            else
             {
+                i += 1;
                 assert(token_is(source, tokens, count, i++, ":"));
                 i += compile_statementlist(source, tokens, count, i);
             }
@@ -769,7 +769,7 @@ size_t compile_register_func(const char * source, Token * tokens, size_t count, 
     funcs_registered[id] = (Funcdef) {1, 0, j, id, prog_i, 0, 0, 0, 0};
     if (j > 0)
     {
-        funcs_registered[id].args = (uint16_t *)malloc(sizeof(uint16_t)*j);
+        funcs_registered[id].args = (uint16_t *)zalloc(sizeof(uint16_t)*j);
         memcpy(funcs_registered[id].args, args, j * sizeof(uint16_t));
     }
     
@@ -851,7 +851,7 @@ typedef struct _Array { struct _Value * buf; size_t len; size_t cap; } Array;
 typedef struct _Dict { struct _BiValue * buf; size_t len; size_t cap; } Dict;
 
 // tag
-enum { VALUE_INVALID, VALUE_FLOAT, VALUE_ARRAY, VALUE_DICT, VALUE_STRING, VALUE_FUNC, VALUE_NULL };
+enum { VALUE_NULL, VALUE_INVALID, VALUE_FLOAT, VALUE_ARRAY, VALUE_DICT, VALUE_STRING, VALUE_FUNC };
 
 typedef struct _Value {
     union { double f; Array * a; Dict * d; char * s; Funcdef * fn; } u;
@@ -881,7 +881,7 @@ uint64_t val_hash(Value * v)
     assert(v->tag == VALUE_STRING || v->tag == VALUE_FLOAT || v->tag == VALUE_FUNC || v->tag == VALUE_NULL,
            "Tried to use an unhashable type (dict or array) as a dict key");
     uint64_t hash = 0;
-    uint64_t hv = 0xf1357aea2e62a9c5;
+    uint64_t hv = 0xf6f1029eab913ac5;
     
     hash = (hash + v->tag) * hv;
     if (v->tag == VALUE_FLOAT)  hash = (hash + double_bits_safe(v->u.f)) * hv;
@@ -895,16 +895,14 @@ uint64_t val_hash(Value * v)
 void dict_reallocate(Dict * d, size_t newcap)
 {
     size_t mask = newcap - 1;
-    BiValue * newbuf = malloc(sizeof(BiValue) * newcap);
-    memset(newbuf, 0, sizeof(BiValue) * newcap);
+    BiValue * newbuf = zalloc(sizeof(BiValue) * newcap);
+    for (size_t i = 0; i < newcap; i++)
+        newbuf[i] = (BiValue) { val_tagged(VALUE_INVALID), val_tagged(VALUE_INVALID) };
     for (size_t i = 0; i < d->cap; i++)
     {
-        Value * l = &d->buf[i].l;
-        Value * r = &d->buf[i].r;
-        uint64_t hash = val_hash(l) & mask;
+        uint64_t hash = val_hash(&d->buf[i].l) & mask;
         while (newbuf[hash].l.tag == VALUE_INVALID) hash = (hash + 1) & mask;
-        newbuf[hash].l = *l;
-        newbuf[hash].r = *r;
+        newbuf[hash] = (BiValue) { d->buf[i].l, d->buf[i].r };
     }
     d->cap = newcap;
     d->buf = newbuf;
@@ -954,7 +952,7 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame);
 
 void interpret(void)
 {
-    Frame * frame = (Frame *)malloc(sizeof(Frame));
+    Frame * frame = (Frame *)zalloc(sizeof(Frame));
     assert(frame, "Out of memory");
     
     Frame * global_frame = frame;
@@ -991,8 +989,8 @@ void interpret(void)
         NEXT_CASE(INST_ARRAY_LITERAL)
             uint16_t itemcount = program[frame->pc + 1];
             Value v = val_tagged(VALUE_ARRAY);
-            v.u.a = (Array *)malloc(sizeof(Array));
-            v.u.a->buf = (Value *)malloc(sizeof(Value) * itemcount);
+            v.u.a = (Array *)zalloc(sizeof(Array));
+            v.u.a->buf = (Value *)zalloc(sizeof(Value) * itemcount);
             v.u.a->len = itemcount;
             v.u.a->cap = itemcount;
             while (itemcount > 0) v.u.a->buf[--itemcount] = frame->stack[--frame->stackpos];
@@ -1008,9 +1006,8 @@ void interpret(void)
             else\
             {\
                 Frame * prev = frame;\
-                Frame * next = (Frame *)malloc(sizeof(Frame));\
+                Frame * next = (Frame *)zalloc(sizeof(Frame));\
                 assert(next, "Out of memory");\
-                memset(next, 0, sizeof(Frame));\
                 PC_INC();\
                 next->return_to = frame;\
                 frame = next;\
@@ -1055,8 +1052,7 @@ void interpret(void)
         NEXT_CASE(PUSH_DICT_EMPTY)
             memset(&frame->stack[frame->stackpos], 0, sizeof(Value));
             Value v = val_tagged(VALUE_DICT);
-            v.u.d = (Dict *)malloc(sizeof(Dict));
-            memset(v.u.d, 0, sizeof(Dict));
+            v.u.d = (Dict *)zalloc(sizeof(Dict));
             STACK_PUSH(v)
         
         NEXT_CASE(PUSH_NUM)
@@ -1202,12 +1198,9 @@ void interpret(void)
             
         NEXT_CASE(INST_SET_ADDR)
             Value v2 = frame->stack[--frame->stackpos];
-            if (frame->assign_target_agg)
-                *frame->assign_target_agg = v2;
-            else
-                assert(frame->assign_target_char && v2.tag == VALUE_STRING && *v2.u.s != '\0');
-            if (frame->assign_target_char)
-                *frame->assign_target_char = *v2.u.s;
+            if (frame->assign_target_agg)   *frame->assign_target_agg = v2;
+            else assert(frame->assign_target_char && v2.tag == VALUE_STRING && *v2.u.s != '\0');
+            if (frame->assign_target_char)  *frame->assign_target_char = *v2.u.s;
             frame->assign_target_agg = 0;
             frame->assign_target_char = 0;
         
@@ -1246,18 +1239,12 @@ void interpret(void)
         NEXT_CASE(INST_LAMBDA)
             uint16_t id = program[frame->pc + 1];
             Value v = val_func(id);
-            Funcdef * f = (Funcdef *)malloc(sizeof(Funcdef));
+            Funcdef * f = (Funcdef *)zalloc(sizeof(Funcdef));
             *f = *v.u.fn;
             //printf("%p\n", f->caps);
-            if (f->cap_count)
-                f->cap_data = (Value **)malloc(sizeof(Value *) * f->cap_count);
+            if (f->cap_count) f->cap_data = (Value **)zalloc(sizeof(Value *) * f->cap_count);
             for (size_t j = 0; j < f->cap_count; j++)
-            {
-                if (f->caps[j] < 0) // recapture
-                    f->cap_data[j] = frame->caps[-f->caps[j]];
-                else
-                    f->cap_data[j] = &frame->vars[f->caps[j]];
-            }
+                f->cap_data[j] = (f->caps[j] < 0) ? frame->caps[-f->caps[j]] : &frame->vars[f->caps[j]];
             v.u.fn = f;
             STACK_PUSH(v)
             READ_AND_GOTO_TARGET(3)

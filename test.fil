@@ -95,8 +95,14 @@ func fwrap():
     let f = lambda[z](): print("sadkgew") z -= 0.93 print(z) print("jiregdsoaw") end
     f()
     f()
-    f()
+    return f
 end
 
-fwrap()
-#print("x")
+let f = fwrap()
+f()
+f()
+
+print("x")
+
+let q
+print(q)
