@@ -161,11 +161,9 @@ enum {
     INST_DISCARD = 0x100,
     PUSH_NULL, PUSH_DICT_EMPTY,
     INST_RETURN_VAL, INST_RETURN_VOID,
-    INST_ADD, INST_SUB, INST_MUL, INST_DIV,
+    INST_ADD, INST_SUB, INST_MUL, INST_DIV, INST_CMP_AND, INST_CMP_OR,
     INST_CMP_EQ, INST_CMP_NE, INST_CMP_GT, INST_CMP_LT, INST_CMP_GE, INST_CMP_LE,
-    INST_CMP_AND, INST_CMP_OR,
-    INST_INDEX,
-    INST_INDEX_ADDR, INST_ASSIGN_ADDR,
+    INST_INDEX, INST_INDEX_ADDR, INST_ASSIGN_ADDR,
     INST_ASSIGN_ADDR_ADD, INST_ASSIGN_ADDR_SUB, INST_ASSIGN_ADDR_MUL, INST_ASSIGN_ADDR_DIV,
     // 1-op
     PUSH_FUNCNAME = 0x220,
@@ -179,15 +177,12 @@ enum {
     INST_FUNCCALL_EXPR, // arg count
     INST_ARRAY_LITERAL, // item count
     // 2-op
-    INST_JMP = 0x340, // destination
-    INST_JMP_IF_FALSE, // destination
-    INST_JMP_IF_TRUE, // destination
-    INST_FUNCDEF, // skip destination
-    INST_FUNCCALL, // func id, arg count
+    INST_JMP = 0x340, INST_JMP_IF_FALSE, INST_JMP_IF_TRUE, // destination
+    INST_FUNCDEF, INST_FUNCCALL, // skip destination // func id, arg count
     // 4-op
-    INST_FOREND = 0x560, // var id (2), for slot (2), destination (4)
-    INST_FORSTART, // var id (2), for slot (2), end of loop (4) (needed if loop val is 0)
-    PUSH_NUM, // f64
+    PUSH_NUM = 0x560, // f64
+    INST_FOREND, // var id (2), for slot (2), destination (4)
+    INST_FORSTART, // var id (2), for slot (2), destination(4) (needed if loop val is 0)
 };
 
 // TODO: make non-global
