@@ -187,7 +187,7 @@ enum { INST_INVALID = 0x000,
 };
 
 typedef struct _Program { uint16_t * code; uint32_t capacity; uint32_t i; } Program;
-Program prog = (Program) {0, PROGRAM_MAXLEN, 0};
+Program prog = {0, PROGRAM_MAXLEN, 0};
 void init_program() { prog.code = zalloc(sizeof(uint16_t) * prog.capacity); }
 
 void prog_write(uint16_t a) { prog.code[prog.i++] = a; }
