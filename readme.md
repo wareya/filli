@@ -1,6 +1,6 @@
 # Filli
 
-Filli is an ultra small (language code under 1000 cloc) dynamic programming language written in pure C (C23, or C99 with GCCisms) with no dependencies.
+Filli is an ultra small (language code under 1000 SLOC) dynamic programming language written in pure C (C23, or C99 with GCCisms) with no dependencies.
 
 Embeddable, header-only, not horribly slow, and configurable. The reference `.fil` file runner compiles down to ~32KB with `clang -Os -flto` etc. (Hello World compiles down to ~5B with the same setup, so Filli only is only "costing" 27KB out of that 32KB.)
 
@@ -11,7 +11,7 @@ Filli is meant to be used with BDWGC (aka Boehm GC) or some similar interior-poi
 ## Features
 
 - VERY small implementation
-- - Language code is less than 1000 cloc
+- - Language code is less than 1000 SLOC
 - - Reference application compiles down to ~32KB
 - Easy to embed
 - Familiar lua-like syntax
