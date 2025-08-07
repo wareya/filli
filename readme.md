@@ -2,7 +2,7 @@
 
 Filli is an ultra small (language code under 1000 cloc) dynamic programming language written in pure C (C23) with no dependencies.
 
-Embeddable, header-only, not horribly slow, and configurable. The reference `.fil` file runner compiles down to ~30KB with `clang -Os -flto` etc. (Hello World compiles down to ~5B with the same setup, so Filli only is only "costing" 25KB out of that 30KB.)
+Embeddable, header-only, not horribly slow, and configurable. The reference `.fil` file runner compiles down to ~32KB with `clang -Os -flto` etc. (Hello World compiles down to ~5B with the same setup, so Filli only is only "costing" 27KB out of that 32KB.)
 
 Depending on compiler flags, the microbenchmarks I've tested vary from 35% to 50% the runtime of the Lua equivalent. Lua is a very fast interpreter, so this means that Filli isn't horribly inefficient.
 
@@ -12,7 +12,7 @@ Filli is meant to be used with BDWGC (aka Boehm GC) or some similar interior-poi
 
 - VERY small implementation
 - - Language code is less than 1000 cloc
-- - Reference application compiles down to ~30KB
+- - Reference application compiles down to ~32KB
 - Easy to embed
 - Familiar lua-like syntax
 - - Not indentation-sensitive
@@ -22,11 +22,9 @@ Filli is meant to be used with BDWGC (aka Boehm GC) or some similar interior-poi
 - Dynamically typed, imperative and functional
 - Function-scoped variables with downwards visibility
 - Support for closure lambdas
-- Arrays (shared references)
-- Dictionaries (shared references)
-- Strings (shared references)
-- Double-precision floats
-- Function references
+- Generator-coroutines; `yield` returns an array of return value and resumable generator state
+- Reference types: arrays, dictionaries, strings, function references, and generator states
+- Value types: double-precision floats
 - Control flow: `if`, `for`-range, and `while` loops
 - - Loops support `break` and `continue`
 - - No `goto`
