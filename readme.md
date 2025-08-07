@@ -101,5 +101,5 @@ Filli uses assertions to validate that it's not about to do something invalid or
 
 ## License
 
-Apache 2.0 and/or MIT, at your choice
+Apache 2.0 and/or MIT, at your choice. Coypright 2025 "wareya" and any contributors.
 
