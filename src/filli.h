@@ -978,23 +978,20 @@ size_t interpret(size_t from_pc)
             while (itemcount > 0) v.u.a->buf[--itemcount] = frame->stack[--frame->stackpos];
             STACK_PUSH(v)
         
-        #define ENTER_FUNC(ISREF, FORCE_FRAME)\
+        #define ENTER_FUNC(ISREF, FORCED)\
             assert2(0, fn->exists, "Function does not exist");\
-            if (!fn->intrinsic)\
-            {\
-                Frame * prev = frame;\
-                Frame * next = (FORCE_FRAME) ? (FORCE_FRAME) : (Frame *)zalloc(sizeof(Frame));\
+            if (!fn->intrinsic) {\
+                PC_INC(); Frame * prev = frame;\
+                Frame * next = (FORCED) ? (FORCED) : (Frame *)zalloc(sizeof(Frame));\
                 next->fn = fn;\
-                PC_INC();\
                 next->return_to = frame;\
                 frame = next;\
                 assert2(0, argcount == fn->argcount, "Function arg count doesn't match");\
-                if (!(FORCE_FRAME)) for (size_t i = fn->argcount; i > 0;) frame->vars[--i] = prev->stack[--prev->stackpos];\
-                if (!(FORCE_FRAME)) if (fn->cap_data) frame->caps = fn->cap_data; \
-                if (!(FORCE_FRAME)) frame->pc = fn->loc;\
+                if (!(FORCED)) for (size_t i = fn->argcount; i > 0;) frame->vars[--i] = prev->stack[--prev->stackpos];\
+                if (!(FORCED)) if (fn->cap_data) frame->caps = fn->cap_data; \
+                if (!(FORCED)) frame->pc = fn->loc;\
                 if (ISREF) prev->stackpos -= 1;\
-                continue;\
-            }\
+                continue; }\
             handle_intrinsic_func(fn->id, argcount, frame); // intrinsics
         
         NEXT_CASE(INST_FUNCCALL)
@@ -1039,8 +1036,7 @@ size_t interpret(size_t from_pc)
             STACK_PUSH(val_tagged(VALUE_NULL))
             continue;
         
-        NEXT_CASE(PUSH_NULL)
-            STACK_PUSH(val_tagged(VALUE_NULL))
+        NEXT_CASE(PUSH_NULL)    STACK_PUSH(val_tagged(VALUE_NULL))
         
         NEXT_CASE(PUSH_DICT_EMPTY)
             Value v = val_tagged(VALUE_DICT);
@@ -1052,14 +1048,12 @@ size_t interpret(size_t from_pc)
             memcpy(&f, prog.code + frame->pc + 1, 8);
             STACK_PUSH(val_float(f))
         
-        NEXT_CASE(PUSH_GLOBAL)
-            STACK_PUSH(global_frame->vars[prog.code[frame->pc + 1]])
+        NEXT_CASE(PUSH_GLOBAL)    STACK_PUSH(global_frame->vars[prog.code[frame->pc + 1]])
         NEXT_CASE(INST_SET_GLOBAL)
             Value v = frame->stack[--frame->stackpos];
             global_frame->vars[prog.code[frame->pc + 1]] = v;
         
-        NEXT_CASE(PUSH_CAP)
-            STACK_PUSH(*frame->caps[prog.code[frame->pc + 1]])
+        NEXT_CASE(PUSH_CAP)    STACK_PUSH(*frame->caps[prog.code[frame->pc + 1]])
         NEXT_CASE(INST_SET_CAP)
             Value v = frame->stack[--frame->stackpos];
             *frame->caps[prog.code[frame->pc + 1]] = v;
@@ -1148,19 +1142,13 @@ size_t interpret(size_t from_pc)
             if (frame->vars[id].u.f < frame->forloops[idx])
                 READ_AND_GOTO_TARGET(3)
         
-        NEXT_CASE(INST_JMP)
-            READ_AND_GOTO_TARGET(1)
-        NEXT_CASE(INST_JMP_IF_FALSE)
-            if (!val_truthy(frame->stack[--frame->stackpos])) READ_AND_GOTO_TARGET(1)
-        NEXT_CASE(INST_JMP_IF_TRUE)
-            if (val_truthy(frame->stack[--frame->stackpos])) READ_AND_GOTO_TARGET(1)
+        NEXT_CASE(INST_JMP)    READ_AND_GOTO_TARGET(1)
+        NEXT_CASE(INST_JMP_IF_FALSE)    if (!val_truthy(frame->stack[--frame->stackpos])) READ_AND_GOTO_TARGET(1)
+        NEXT_CASE(INST_JMP_IF_TRUE)     if ( val_truthy(frame->stack[--frame->stackpos])) READ_AND_GOTO_TARGET(1)
         
-        NEXT_CASE(PUSH_STRING)
-            STACK_PUSH(val_string(stringdup(cs->compiled_strings[prog.code[frame->pc + 1]])))
-        NEXT_CASE(PUSH_LOCAL)
-            STACK_PUSH(frame->vars[prog.code[frame->pc + 1]])
-        NEXT_CASE(PUSH_FUNCNAME)
-            STACK_PUSH(val_func(prog.code[frame->pc + 1]))
+        NEXT_CASE(PUSH_STRING)      STACK_PUSH(val_string(stringdup(cs->compiled_strings[prog.code[frame->pc + 1]])))
+        NEXT_CASE(PUSH_LOCAL)       STACK_PUSH(frame->vars[prog.code[frame->pc + 1]])
+        NEXT_CASE(PUSH_FUNCNAME)    STACK_PUSH(val_func(prog.code[frame->pc + 1]))
         
         NEXT_CASE(INST_SET)
             frame->vars[prog.code[frame->pc + 1]] = frame->stack[--frame->stackpos];
