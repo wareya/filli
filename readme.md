@@ -22,7 +22,7 @@ Filli is meant to be used with BDWGC (aka Boehm GC) or some similar interior-poi
 - Dynamically typed, imperative and functional
 - Function-scoped variables with downwards visibility
 - Support for closure lambdas
-- Generator-coroutines; `yield` returns an array of return value and resumable generator state
+- Generator-coroutines; `yield` returns a 2-item array of return value and resumable generator state
 - Reference types: arrays, dictionaries, strings, function references, and generator states
 - Value types: double-precision floats
 - Control flow: `if`, `for`-range, and `while` loops
