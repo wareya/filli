@@ -17,3 +17,23 @@ print(rv[0]) rv = rv[1]()
 print(rv[0]) rv = rv[1]()  
 print(rv[0]) rv = rv[1]()  
 print(rv)
+
+
+let a = [3, 1, 4, 1, 5]
+for i in len(a):
+    print(a[i])
+end
+
+let d = {}
+d["a"] = 591
+d[5] = 4
+
+print(d["a"])
+print(d[5])
+print(d[8])
+
+let a2 = keys(d)
+
+print(a2[0])
+print(a2[1])
+print(a2[2])

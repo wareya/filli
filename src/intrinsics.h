@@ -3,6 +3,8 @@
 
 uint16_t print_id;
 uint16_t typeof_id;
+uint16_t len_id;
+uint16_t keys_id;
 void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
 {
     #define STACK_PUSH2(X) {\
@@ -42,15 +44,46 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
         else if (tag == VALUE_STATE)    STACK_PUSH2(val_string("funcstate"))
         else if (tag == VALUE_NULL)     STACK_PUSH2(val_string("null"))
     }
+    else if (id == len_id)
+    {
+        assert2(, argcount == 1, "Wrong number of arguments to function");
+        Value v = frame->stack[frame->stackpos - 1];
+        int tag = v.tag;
+        frame->stackpos -= 1;
+        if      (tag == VALUE_ARRAY)    STACK_PUSH2(val_float(v.u.a->len))
+        else if (tag == VALUE_STRING)   STACK_PUSH2(val_float(strlen(v.u.s)))
+        else if (tag == VALUE_DICT)     STACK_PUSH2(val_float(v.u.d->len))
+        else panic2(,"Tried to use len() on something with no length");
+    }
+    else if (id == keys_id)
+    {
+        assert2(, argcount == 1, "Wrong number of arguments to function");
+        Value v = frame->stack[frame->stackpos - 1];
+        int tag = v.tag;
+        frame->stackpos -= 1;
+        if (tag == VALUE_DICT)
+        {
+            Value v2 = val_array(v.u.d->len);
+            size_t j = 0;
+            for (size_t i = 0; i < v.u.d->cap && j < v2.u.a->len; i++)
+            {
+                if (v.u.d->buf[i].l.tag != VALUE_INVALID)
+                    v2.u.a->buf[j++] = v.u.d->buf[i].l;
+            }
+            STACK_PUSH2(v2)
+        }
+        else panic2(,"Tried to use keys() on a non-dictionary");
+    }
     else panic2(,"Unknown internal function");
 }
 
 void register_intrinsic_funcs(void)
 {
-    register_intrinsic_func("print");
-    print_id = lex_ident_offset - insert_or_lookup_id("print", 5);
-    register_intrinsic_func("typeof");
-    typeof_id = lex_ident_offset - insert_or_lookup_id("typeof", 6);
+#define REGISTER(X) register_intrinsic_func(#X); X ## _id = lex_ident_offset - insert_or_lookup_id(#X, strlen(#X));
+    REGISTER(print)
+    REGISTER(typeof)
+    REGISTER(len)
+    REGISTER(keys)
 }
 
 #endif

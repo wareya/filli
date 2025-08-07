@@ -898,20 +898,20 @@ void dict_reallocate(Dict * d, size_t newcap)
     d->cap = newcap;
     d->buf = newbuf;
 }
-Value * dict_get_or_insert(Dict * d, Value * v)
+BiValue * dict_get_or_insert(Dict * d, Value * v)
 {
     if (d->cap == 0) dict_reallocate(d, 64);
     // max 50% load factor
     if (d->len * 2 > d->cap) dict_reallocate(d, d->cap * 2);
     
     uint64_t hash = val_hash(v) & (d->cap - 1);
-    while (val_eq(v, &d->buf[hash].l)) hash = (hash + 1) & (d->cap - 1);
+    while (d->buf[hash].r.tag != VALUE_INVALID && !val_eq(v, &d->buf[hash].l)) hash = (hash + 1) & (d->cap - 1);
     if (d->buf[hash].r.tag == VALUE_INVALID) 
     {
         d->len++;
-        d->buf[hash].r = val_tagged(VALUE_NULL);
+        d->buf[hash] = (BiValue) { *v, val_tagged(VALUE_NULL) };
     }
-    return &d->buf[hash].r;
+    return &d->buf[hash];
 }
 
 uint8_t val_truthy(Value v)
@@ -1197,13 +1197,13 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_INDEX)    INDEX_SHARED(<=)
             if (v1.tag == VALUE_STRING) v1.u.s = stringdupn(v1.u.s + (size_t)v2.u.f, 1);
             if (v1.tag == VALUE_ARRAY)  v1 = *array_get(v1.u.a, v2.u.f);
-            if (v1.tag == VALUE_DICT)   v1 = *dict_get_or_insert(v1.u.d, &v2);
+            if (v1.tag == VALUE_DICT)   v1 = dict_get_or_insert(v1.u.d, &v2)->r;
             frame->stack[frame->stackpos++] = v1;
         
         NEXT_CASE(INST_INDEX_LOC)    INDEX_SHARED(<)
             if (v1.tag == VALUE_STRING) frame->assign_target_char = v1.u.s + (size_t)v2.u.f;
             if (v1.tag == VALUE_ARRAY)  frame->assign_target_agg = array_get(v1.u.a, v2.u.f);
-            if (v1.tag == VALUE_DICT)   frame->assign_target_agg = dict_get_or_insert(v1.u.d, &v2);
+            if (v1.tag == VALUE_DICT)   frame->assign_target_agg = &(dict_get_or_insert(v1.u.d, &v2)->r);
         
         NEXT_CASE(INST_LAMBDA)
             Value v = val_func(prog.code[frame->pc + 1]);
