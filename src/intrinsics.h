@@ -143,8 +143,9 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
             frame->stackpos -= 2;
             BiValue * pair = dict_get_or_insert(v.u.d, &v2);
             Value ret = pair->r;
-            pair->l = val_tagged(VALUE_INVALID);
+            pair->l = val_tagged(VALUE_TOMBSTONE);
             pair->r = val_tagged(VALUE_INVALID);
+            if (ret.tag == VALUE_INVALID) ret = val_tagged(VALUE_NULL);
             if (ret.tag == VALUE_INVALID) ret = val_tagged(VALUE_NULL);
             v.u.a->len -= 1;
             STACK_PUSH2(ret)

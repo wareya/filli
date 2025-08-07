@@ -893,7 +893,7 @@ void dict_reallocate(Dict * d, size_t newcap)
     {
         if (d->buf[i].l.tag == VALUE_TOMBSTONE || d->buf[i].l.tag == VALUE_INVALID) continue;
         uint64_t hash = val_hash(&d->buf[i].l) & (newcap - 1);
-        while (newbuf[hash].r.tag != VALUE_INVALID && !val_eq(&d->buf[i].l, &newbuf[hash].l)) hash = (hash + 1) & (d->cap - 1);
+        while (newbuf[hash].l.tag != VALUE_INVALID && !val_eq(&d->buf[i].l, &newbuf[hash].l)) hash = (hash + 1) & (d->cap - 1);
         newbuf[hash] = (BiValue) { d->buf[i].l, d->buf[i].r };
     }
     d->tombs = 0;
@@ -907,8 +907,8 @@ BiValue * dict_get_or_insert(Dict * d, Value * v)
     if ((d->len + 1 + d->tombs) * 2 > d->cap) dict_reallocate(d, d->cap * 2);
     
     uint64_t hash = val_hash(v) & (d->cap - 1);
-    while (d->buf[hash].r.tag != VALUE_INVALID && !val_eq(v, &d->buf[hash].l)) hash = (hash + 1) & (d->cap - 1);
-    if (d->buf[hash].r.tag == VALUE_INVALID) 
+    while (d->buf[hash].l.tag != VALUE_INVALID && !val_eq(v, &d->buf[hash].l)) hash = (hash + 1) & (d->cap - 1);
+    if (d->buf[hash].l.tag == VALUE_INVALID) 
     {
         d->len++;
         d->buf[hash] = (BiValue) { *v, val_tagged(VALUE_NULL) };
