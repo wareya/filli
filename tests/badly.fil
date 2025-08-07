@@ -68,10 +68,21 @@ d["a"] = 591
 d[5] = 4
 d[8] # accessing a dict field automatically fills it with null if it doesn't exist yet
 
+print()
+
 foreach(d, lambda[](x):
     print(x, d[x])
 end )
 
+print()
+
+dict_remove(d, 8)
+
+foreach(d, lambda[](x):
+    print(x, d[x])
+end )
+
+print()
 
 let a = []
 array_insert(a, 0, 3.142)
