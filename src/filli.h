@@ -29,7 +29,7 @@ const char * filli_err = 0;
 //#define panic2(N, X) panic(X)
 #define repanic(N) { if (filli_err) return N; }
 
-void * zalloc(size_t s) { char * r = (char *)malloc(s); memset(r, 0, s); return r; }
+void * zalloc(size_t s) { char * r = (char *)malloc(s); if (!r) panic("Out of memory"); memset(r, 0, s); return r; }
 
 // actual prog.code
 
@@ -95,7 +95,7 @@ Token * tokenize(const char * src, size_t * count)
 {
     int newline_is_token = 1;
     
-    const char * long_punctuation[] = { "==", "!=", ">=", "<=", "+=", "-=", "*=", "/=", "{}" };
+    const char * longpunc[] = { "==", "!=", ">=", "<=", "+=", "-=", "*=", "/=", "{}" };
     
     size_t len = strlen(src);
     
@@ -147,13 +147,12 @@ Token * tokenize(const char * src, size_t * count)
         else
         {
             // long punctuation
-            for (size_t j = 0; j < sizeof(long_punctuation) / sizeof(long_punctuation[0]); j++)
+            for (size_t j = 0; j < sizeof(longpunc) / sizeof(longpunc[0]); j++)
             {
-                size_t len = strlen(long_punctuation[j]);
-                if (strncmp(long_punctuation[j], src+i, len) == 0)
+                if (strncmp(longpunc[j], src+i, strlen(longpunc[j])) == 0)
                 {
-                    ret[t++] = mk_token(i, len, 2);
-                    i += len;
+                    ret[t++] = mk_token(i, strlen(longpunc[j]), 2);
+                    i += strlen(longpunc[j]);
                     goto fullcontinue;
                 }
             }
@@ -168,8 +167,7 @@ Token * tokenize(const char * src, size_t * count)
     return ret;
 }
 
-enum {
-    INST_INVALID,
+enum { INST_INVALID = 0x000,
     // zero-op
     INST_DISCARD = 0x100, PUSH_NULL, PUSH_DICT_EMPTY, INST_RETURN_VAL, INST_RETURN_VOID,
     INST_ADD, INST_SUB, INST_MUL, INST_DIV, INST_CMP_AND, INST_CMP_OR,
@@ -241,13 +239,13 @@ typedef struct _Funcdef {
 
 typedef struct _CompilerData {
     const char * compiled_strings[1<<16];
-    uint16_t globals_registered[IDENTIFIER_COUNT];
-    Funcdef funcs_registered[IDENTIFIER_COUNT + LAMBDA_COUNT];
+    uint16_t globals_reg[IDENTIFIER_COUNT];
+    Funcdef funcs_reg[IDENTIFIER_COUNT + LAMBDA_COUNT];
     
     uint32_t lambda_id;
     uint32_t compiled_string_i, locals_reg_i, globals_n, locals_n, caps_reg_i, for_loop_index, func_depth;
 
-    uint16_t * locals_registered, * caps_registered;
+    uint16_t * locals_reg, * caps_reg;
     uint16_t * locals_reg_stack[1024], * caps_reg_stack[1024];
     
     uint32_t loop_nesting, loop_cont_i, loop_break_i;
@@ -285,13 +283,13 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
             return prog_write5(PUSH_NUM, 0, 0, 0, 0), 1;
         else if (token_is(source, tokens, count, i, "null"))
             return prog_write(PUSH_NULL), 1;
-        else if (cs->func_depth > 0 && cs->locals_registered[id])
-            prog_write2(PUSH_LOCAL, cs->locals_registered[id] - 1);
-        else if (cs->func_depth > 0 && cs->caps_registered[id])
-            prog_write2(PUSH_CAP, cs->caps_registered[id] - 1);
-        else if (cs->globals_registered[id])
-            prog_write2(PUSH_GLOBAL, cs->globals_registered[id] - 1);
-        else if (cs->funcs_registered[id].exists)
+        else if (cs->func_depth > 0 && cs->locals_reg[id])
+            prog_write2(PUSH_LOCAL, cs->locals_reg[id] - 1);
+        else if (cs->func_depth > 0 && cs->caps_reg[id])
+            prog_write2(PUSH_CAP, cs->caps_reg[id] - 1);
+        else if (cs->globals_reg[id])
+            prog_write2(PUSH_GLOBAL, cs->globals_reg[id] - 1);
+        else if (cs->funcs_reg[id].exists)
             prog_write2(PUSH_FUNCNAME, id);
         else
         {
@@ -347,18 +345,18 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
 void compile_func_start(void)
 {
     cs->func_depth += 1;
-    cs->locals_reg_stack[cs->locals_reg_i++] = cs->locals_registered;
-    cs->locals_registered = (uint16_t *)zalloc(sizeof(uint16_t) * IDENTIFIER_COUNT);
-    cs->caps_reg_stack[cs->caps_reg_i++] = cs->caps_registered;
-    cs->caps_registered = (uint16_t *)zalloc(sizeof(uint16_t) * IDENTIFIER_COUNT);
+    cs->locals_reg_stack[cs->locals_reg_i++] = cs->locals_reg;
+    cs->locals_reg = (uint16_t *)zalloc(sizeof(uint16_t) * IDENTIFIER_COUNT);
+    cs->caps_reg_stack[cs->caps_reg_i++] = cs->caps_reg;
+    cs->caps_reg = (uint16_t *)zalloc(sizeof(uint16_t) * IDENTIFIER_COUNT);
     assert2(, cs->caps_reg_i < 1024 && cs->locals_reg_i < 1024);
 }
 void compile_func_end(void)
 {
-    free(cs->locals_registered);
-    cs->locals_registered = cs->locals_reg_stack[--cs->locals_reg_i];
-    free(cs->caps_registered);
-    cs->caps_registered = cs->caps_reg_stack[--cs->caps_reg_i];
+    free(cs->locals_reg);
+    cs->locals_reg = cs->locals_reg_stack[--cs->locals_reg_i];
+    free(cs->caps_reg);
+    cs->caps_reg = cs->caps_reg_stack[--cs->caps_reg_i];
     cs->func_depth -= 1;
 }
 size_t compile_lambda(const char * source, Token * tokens, size_t count, size_t i, int16_t * caps, uint16_t caps_count);
@@ -372,13 +370,13 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
         
         if (!token_is(source, tokens, count, i++, "[")) return 0;
         int16_t * caps = (int16_t *)zalloc(sizeof(int16_t) * CAPTURELIMIT);
-        uint16_t * caps_registered_next = (uint16_t *)zalloc(sizeof(uint16_t) * IDENTIFIER_COUNT);
+        uint16_t * caps_reg_next = (uint16_t *)zalloc(sizeof(uint16_t) * IDENTIFIER_COUNT);
         PARSE_COMMALIST("]", return 0, return 0, assert2(0, j < CAPTURELIMIT),
             if (tokens[i].kind >= MIN_KEYWORD) return 0;
             int16_t id = lex_ident_offset - tokens[i++].kind;
             int16_t accessor_id = 0;
-            if      (cs->func_depth > 0 && cs->locals_registered[id])   accessor_id = cs->locals_registered[id] - 1;
-            else if (cs->func_depth > 0 && cs->caps_registered  [id])   accessor_id = cs->caps_registered[id] - 1; // FIXME: ???
+            if      (cs->func_depth > 0 && cs->locals_reg[id])   accessor_id = cs->locals_reg[id] - 1;
+            else if (cs->func_depth > 0 && cs->caps_reg  [id])   accessor_id = cs->caps_reg[id] - 1;
             else
             {
                 printsn(source + tokens[i - 1].i, tokens[i - 1].len);
@@ -386,14 +384,14 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
                 panic2(0, "Unable to capture identifier");
             }
             caps[j] = accessor_id;
-            caps_registered_next[id] = j + 1;
+            caps_reg_next[id] = j + 1;
         )
         
         uint32_t prev_locals_n = cs->locals_n;
         cs->locals_n = 0;
         compile_func_start();
         
-        memcpy(cs->caps_registered, caps_registered_next, sizeof(uint16_t) * IDENTIFIER_COUNT);
+        memcpy(cs->caps_reg, caps_reg_next, sizeof(uint16_t) * IDENTIFIER_COUNT);
         size_t r = compile_lambda(source, tokens, count, i, caps, j);
         
         compile_func_end();
@@ -532,12 +530,11 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
             }
             else
             {
-                i += 1;
-                assert2(0, token_is(source, tokens, count, i++, ":"));
-                i += compile_statementlist(source, tokens, count, i);
+                assert2(0, token_is(source, tokens, count, ++i, ":"), "Expected ':'");
+                i += compile_statementlist(source, tokens, count, i + 1) + 1;
             }
         }
-        assert2(0, tokens[i].kind == -11, "Missing end keyword");
+        assert2(0, tokens[i].kind == -11, "Expected 'end'");
         uint32_t real_end = prog.i;
         while (skip_i > 0) memcpy(prog.code + skips[--skip_i], &real_end, 4);
         return i + 1 - orig_i;
@@ -550,14 +547,13 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         
         size_t expr_i = i + 1;
         i += compile_expr(source, tokens, count, expr_i, 0) + 1;
-        assert2(0, token_is(source, tokens, count, i++, ":"));
+        assert2(0, token_is(source, tokens, count, i++, ":"), "Expected ':'");
         prog_write3(INST_JMP_IF_FALSE, 0, 0);
         size_t skip_at = prog.i - 2;
         uint32_t loop_at = prog.i;
         
         i += compile_statementlist(source, tokens, count, i);
-        assert2(0, i < count);
-        assert2(0, tokens[i].kind == -11, "Missing end keyword"); // end
+        assert2(0, i < count && tokens[i].kind == -11, "Expected 'end'"); // end
         
         uint32_t cont_to = prog.i;
         compile_expr(source, tokens, count, expr_i, 0); // recompile test expr
@@ -581,9 +577,9 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         if (++i >= count) return 0;
         int16_t id = lex_ident_offset - tokens[i++].kind;
         
-        if (cs->func_depth == 0) cs->globals_registered[id] = ++cs->globals_n;
-        else                 cs->locals_registered [id] = ++cs->locals_n;
-        assert2(0, cs->globals_n < FRAME_VARCOUNT && cs->locals_n < FRAME_VARCOUNT);
+        if (cs->func_depth == 0) cs->globals_reg[id] = ++cs->globals_n;
+        else                     cs->locals_reg [id] = ++cs->locals_n;
+        assert2(0, cs->globals_n < FRAME_VARCOUNT && cs->locals_n < FRAME_VARCOUNT, "Too many variables");
         
         if (token_is(source, tokens, count, i, "="))
         {
@@ -603,10 +599,10 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         size_t loop_break_base = cs->loop_break_i;
         
         int16_t id = lex_ident_offset - tokens[i++].kind;
-        if (cs->func_depth == 0) cs->globals_registered[id] = ++cs->globals_n;
-        else                 cs->locals_registered [id] = ++cs->locals_n;
-        assert2(0, cs->globals_n < FRAME_VARCOUNT && cs->locals_n < FRAME_VARCOUNT);
-        assert2(0, token_is(source, tokens, count, i++, "in"));
+        if (cs->func_depth == 0) cs->globals_reg[id] = ++cs->globals_n;
+        else                     cs->locals_reg [id] = ++cs->locals_n;
+        assert2(0, cs->globals_n < FRAME_VARCOUNT && cs->locals_n < FRAME_VARCOUNT, "Too many variables");
+        assert2(0, token_is(source, tokens, count, i++, "in"), "Expected 'in'");
         uint16_t idx = cs->for_loop_index++;
         assert2(0, idx < FORLOOP_COUNT_LIMIT, "Too many for loops")
         
@@ -618,10 +614,10 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         
         uint32_t head = prog.i;
         
-        assert2(0, token_is(source, tokens, count, i++, ":"));
+        assert2(0, token_is(source, tokens, count, i++, ":"), "Expected ':'");
         
         i += compile_statementlist(source, tokens, count, i);
-        assert2(0, tokens[i++].kind == -11, "Missing end keyword");
+        assert2(0, tokens[i++].kind == -11, "Expected 'end'");
         
         uint32_t cont_to = prog.i;
         prog_write5(INST_FOREND, (cs->func_depth == 0) ? cs->globals_n - 1 : cs->locals_n - 1, idx, 0, 0);
@@ -654,9 +650,9 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         i += ret;
         
         uint8_t mode = 10;
-        if (cs->func_depth > 0 && cs->locals_registered[id]) mode = 0;
-        else if (cs->func_depth > 0 && cs->caps_registered[id]) mode = 2;
-        else if (cs->globals_registered[id]) mode = 1;
+        if (cs->func_depth > 0 && cs->locals_reg[id]) mode = 0;
+        else if (cs->func_depth > 0 && cs->caps_reg[id]) mode = 2;
+        else if (cs->globals_reg[id]) mode = 1;
         else panic2(0, "Unknown variable");
         
         if (strncmp(opstr, "=", oplen) == 0)       prog_write(INST_SET + mode);
@@ -665,13 +661,12 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         else if (strncmp(opstr, "*=", oplen) == 0) prog_write(INST_SET_MUL + mode);
         else if (strncmp(opstr, "/=", oplen) == 0) prog_write(INST_SET_DIV + mode);
         
-        prog_write(mode == 0 ? (cs->locals_registered[id] - 1) :
-            mode == 1 ? (cs->globals_registered[id] - 1) : (cs->caps_registered[id] - 1));
+        prog_write((mode == 0 ? cs->locals_reg[id] : mode == 1 ? cs->globals_reg[id] : cs->caps_reg[id]) - 1);
         return i - orig_i;
     }
     else if (i + 2 < count && tokens[i].kind < -lex_ident_offset
              && token_is(source, tokens, count, i+1, "(")
-             && cs->funcs_registered[lex_ident_offset - tokens[i].kind].exists)
+             && cs->funcs_reg[lex_ident_offset - tokens[i].kind].exists)
     {
         uint16_t id = lex_ident_offset - tokens[i++].kind;
         i += 1; // (
@@ -683,16 +678,15 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         )
         
         prog_write3(INST_FUNCCALL, id, j);
-        
         prog_write(INST_DISCARD);
+        
         return i - orig_i;
     }
     else if (tokens[i].kind == -11 || tokens[i].kind == -3 || tokens[i].kind == -2) // end, elif, else
         return i - orig_i;
     else if (token_is(source, tokens, count, i, "\n") || token_is(source, tokens, count, i, ";"))
         return 1;
-    else if (token_is(source, tokens, count, i, "continue")
-             || token_is(source, tokens, count, i, "break"))
+    else if (token_is(source, tokens, count, i, "continue") || token_is(source, tokens, count, i, "break"))
     {
         assert2(0, cs->loop_nesting > 0, "Tried to use break/continue outside of loop");
         prog_write3(INST_JMP, 0, 0);
@@ -759,23 +753,24 @@ size_t compile_register_func(const char * source, Token * tokens, size_t count, 
     
     if (!token_is(source, tokens, count, i++, "(")) panic2(0, "Invalid funcdef")
     uint16_t args[ARGLIMIT];
-    PARSE_COMMALIST(")", panic2(0, "Invalid funcdef"), panic2(0, "Invalid funcdef"), assert2(0, j < ARGLIMIT),
+    PARSE_COMMALIST(")", panic2(0, "Invalid funcdef"), panic2(0, "Invalid funcdef"),
+                    assert2(0, j < ARGLIMIT, "Too many arguments to function"),
         if (tokens[i].kind >= MIN_KEYWORD) panic2(0, "Invalid funcdef");
         args[j] = lex_ident_offset - tokens[i++].kind;
-        cs->locals_registered[args[j]] = ++cs->locals_n;
+        cs->locals_reg[args[j]] = ++cs->locals_n;
     )
     if (!token_is(source, tokens, count, i++, ":")) panic2(0, "Invalid funcdef");
     
-    cs->funcs_registered[id] = (Funcdef) {1, 0, j, id, prog.i, 0, 0, 0, 0};
+    cs->funcs_reg[id] = (Funcdef) {1, 0, j, id, prog.i, 0, 0, 0, 0};
     if (j > 0)
     {
-        cs->funcs_registered[id].args = (uint16_t *)zalloc(sizeof(uint16_t)*j);
-        memcpy(cs->funcs_registered[id].args, args, j * sizeof(uint16_t));
+        cs->funcs_reg[id].args = (uint16_t *)zalloc(sizeof(uint16_t)*j);
+        memcpy(cs->funcs_reg[id].args, args, j * sizeof(uint16_t));
     }
     
     i += compile_statementlist(source, tokens, count, i);
     prog_write(INST_RETURN_VOID);
-    assert2(0, tokens[i++].kind == -11, "Missing end keyword");
+    assert2(0, tokens[i++].kind == -11, "Expected 'end'");
     return i - orig_i;
 }
 
@@ -807,8 +802,8 @@ size_t compile_lambda(const char * source, Token * tokens, size_t count, size_t 
     
     i += compile_register_func(source, tokens, count, id, i);
     
-    cs->funcs_registered[id].caps = caps;
-    cs->funcs_registered[id].cap_count = caps_count;
+    cs->funcs_reg[id].caps = caps;
+    cs->funcs_reg[id].cap_count = caps_count;
     
     memcpy(prog.code + id_offs + 2, &prog.i, 4);
     
@@ -860,7 +855,7 @@ typedef struct _BiValue { struct _Value l; struct _Value r; } BiValue;
 Value val_tagged(uint8_t tag) { Value v; memset(&v, 0, sizeof(Value)); v.tag = tag; return v; }
 Value val_float(double f) { Value v = val_tagged(VALUE_FLOAT); v.u.f = f; return v; }
 Value val_string(char * s) { Value v = val_tagged(VALUE_STRING); v.u.s = s; return v; }
-Value val_func(uint16_t id) { Value v = val_tagged(VALUE_FUNC); v.u.fn = &cs->funcs_registered[id]; return v; }
+Value val_func(uint16_t id) { Value v = val_tagged(VALUE_FUNC); v.u.fn = &cs->funcs_reg[id]; return v; }
 
 Value * array_get(Array * a, size_t i) { assert2(0, i < a->len); return a->buf + i; }
 
@@ -946,8 +941,6 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame);
 size_t interpret(size_t from_pc)
 {
     Frame * frame = (Frame *)zalloc(sizeof(Frame));
-    assert2(0, frame, "Out of memory");
-    
     Frame * global_frame = frame;
     
     frame->pc = from_pc;
@@ -994,7 +987,6 @@ size_t interpret(size_t from_pc)
             {\
                 Frame * prev = frame;\
                 Frame * next = (Frame *)zalloc(sizeof(Frame));\
-                assert2(0, next, "Out of memory");\
                 PC_INC();\
                 next->return_to = frame;\
                 frame = next;\
@@ -1011,7 +1003,7 @@ size_t interpret(size_t from_pc)
         
         NEXT_CASE(INST_FUNCCALL)
             uint16_t argcount = prog.code[frame->pc + 2];
-            Funcdef * fn = &cs->funcs_registered[prog.code[frame->pc + 1]];
+            Funcdef * fn = &cs->funcs_reg[prog.code[frame->pc + 1]];
             ENTER_FUNC(0)
         
         NEXT_CASE(INST_FUNCCALL_REF)
@@ -1234,7 +1226,7 @@ size_t interpret(size_t from_pc)
 void register_intrinsic_func(const char * s)
 {
     int16_t id = lex_ident_offset - insert_or_lookup_id(s, strlen(s));
-    cs->funcs_registered[id] = (Funcdef) {1, 1, 0, id, prog.i, 0, 0, 0, 0};
+    cs->funcs_reg[id] = (Funcdef) {1, 1, 0, id, prog.i, 0, 0, 0, 0};
 }
 
 #include "intrinsics.h"

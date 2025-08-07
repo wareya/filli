@@ -1,5 +1,3 @@
-// NOTE/WARNING: this REPL crashes on syntax errors. only meant as a demo!
-
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -44,14 +42,18 @@ int main(void)
         char * s = fgets(cursor, MAX_INPUT_LEN, stdin);
         if (s == 0) { return 0; }
         
-        if (strcmp(cursor, "exit") == 0) { return 0; }
-        if (strcmp(cursor, "quit") == 0) { return 0; }
+        if (strcmp(cursor, "exit\n") == 0) { return 0; }
+        if (strcmp(cursor, "quit\n") == 0) { return 0; }
         
         size_t count = 0;
         
         if (cursor[0] == '\n' || cursor[0] == '\0')
         {
             cursor = input;
+            
+            Program old_prog = prog;
+            CompilerState old_cs = *cs;
+            
             Token * tokens = tokenize(input, &count);
             compile(input, tokens, count, 0);
             
@@ -61,6 +63,8 @@ int main(void)
                 fputs(filli_err, stdout);
                 fputs("\n", stdout);
                 filli_err = 0;
+                prog = old_prog;
+                *cs = old_cs;
                 continue;
             }
             
@@ -72,6 +76,7 @@ int main(void)
                 fputs(filli_err, stdout);
                 fputs("\n", stdout);
                 filli_err = 0;
+                prog = old_prog;
             }
         }
         else
