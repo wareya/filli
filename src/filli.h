@@ -934,12 +934,14 @@ void print_op_and_panic(uint16_t op) { prints("---\n"); printu16hex(op); prints(
 
 void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame);
 
-void interpret(void)
+size_t interpret(size_t from_pc)
 {
     Frame * frame = (Frame *)zalloc(sizeof(Frame));
     assert(frame, "Out of memory");
     
     Frame * global_frame = frame;
+    
+    frame->pc = from_pc;
     
     #define CASES_START() \
     while (frame->pc < prog_i) {\
@@ -960,7 +962,7 @@ void interpret(void)
         #define READ_AND_GOTO_TARGET(X)\
             { uint32_t target; memcpy(&target, program + (frame->pc + X), 4); frame->pc = target; continue; }
         
-        MARK_CASE(INST_INVALID)     return;
+        MARK_CASE(INST_INVALID)     { PC_INC(); return frame->pc; }
         NEXT_CASE(INST_DISCARD)     --frame->stackpos;
         NEXT_CASE(INST_FUNCDEF)     READ_AND_GOTO_TARGET(1)
         
@@ -976,7 +978,7 @@ void interpret(void)
             while (itemcount > 0) v.u.a->buf[--itemcount] = frame->stack[--frame->stackpos];
             STACK_PUSH(v)
         
-        #define ENTER_FUNC()\
+        #define ENTER_FUNC(ISREF)\
             assert(fn->exists);\
             if (!fn->intrinsic)\
             {\
@@ -990,7 +992,7 @@ void interpret(void)
                 for (size_t i = fn->argcount; i > 0;)\
                     frame->vars[--i] = prev->stack[--prev->stackpos];\
                 if (fn->cap_data) frame->caps = fn->cap_data; \
-                prev->stack[--prev->stackpos];\
+                if (ISREF) prev->stack[--prev->stackpos];\
                 frame->pc = fn->loc;\
                 continue;\
             }\
@@ -1000,24 +1002,24 @@ void interpret(void)
         NEXT_CASE(INST_FUNCCALL)
             uint16_t argcount = program[frame->pc + 2];
             Funcdef * fn = &funcs_registered[program[frame->pc + 1]];
-            ENTER_FUNC()
+            ENTER_FUNC(0)
         
         NEXT_CASE(INST_FUNCCALL_REF)
             uint16_t argcount = program[frame->pc + 1];
             Value v_func = frame->stack[frame->stackpos - argcount - 1];
             assert(v_func.tag == VALUE_FUNC);
             Funcdef * fn = v_func.u.fn;
-            ENTER_FUNC()
+            ENTER_FUNC(1)
         
         NEXT_CASE(INST_RETURN_VAL)
             Value v = frame->stack[--frame->stackpos];
-            if (!frame->return_to) return;
+            if (!frame->return_to) { PC_INC(); return frame->pc; }
             frame = frame->return_to;
             STACK_PUSH(v)
             continue;
         
         NEXT_CASE(INST_RETURN_VOID)
-            if (!frame->return_to) return;
+            if (!frame->return_to) { PC_INC(); return frame->pc; }
             frame = frame->return_to;
             STACK_PUSH(val_tagged(VALUE_NULL))
             continue;
@@ -1215,6 +1217,8 @@ void interpret(void)
         END_CASE()
         DECAULT_CASE()
     CASES_END()
+    
+    return frame->pc;
 }
 
 void register_intrinsic_func(const char * s)

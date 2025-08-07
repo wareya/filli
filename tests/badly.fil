@@ -1,0 +1,7 @@
+func asdf():
+    print(5)
+    return 0.0
+end
+
+asdf()
+print(6)

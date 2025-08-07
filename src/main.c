@@ -59,7 +59,7 @@ int main(int argc, char ** argv)
         prints("\n");
     }
     
-    interpret();
+    interpret(0);
     
     return 0;
 }
