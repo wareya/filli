@@ -7,6 +7,7 @@ uint16_t len_id;
 uint16_t keys_id;
 uint16_t array_insert_id;
 uint16_t array_remove_id;
+uint16_t dict_remove_id;
 
 void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
 {
@@ -18,10 +19,10 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
     {
         for (size_t i = 0; i < argcount; i++)
         {
-            ptrdiff_t offs = i - argcount;
-            int tag = frame->stack[frame->stackpos + offs].tag;
-            if      (tag == VALUE_FLOAT)    prints(baddtostr(frame->stack[frame->stackpos + offs].u.f));
-            else if (tag == VALUE_STRING)   prints(frame->stack[frame->stackpos + offs].u.s);
+            long long int offset = i - argcount;
+            int tag = frame->stack[frame->stackpos + offset].tag;
+            if      (tag == VALUE_FLOAT)    prints(baddtostr(frame->stack[frame->stackpos + offset].u.f));
+            else if (tag == VALUE_STRING)   prints(frame->stack[frame->stackpos + offset].u.s);
             else if (tag == VALUE_ARRAY)    prints("<array>");
             else if (tag == VALUE_DICT)     prints("<dict>");
             else if (tag == VALUE_FUNC)     prints("<func>");
@@ -89,14 +90,17 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
             assert2(, v2.tag == VALUE_FLOAT, "Array indexes must be numbers");
             size_t index = v2.u.f;
             assert2(, index >= 0 && index <= v.u.a->len, "Array index out of range");
-            frame->stackpos -= 1;
+            frame->stackpos -= 3;
             if (v.u.a->len + 1 >= v.u.a->cap)
             {
+                size_t oldcap = v.u.a->cap;
                 v.u.a->cap *= 2;
+                if (v.u.a->cap < 4) v.u.a->cap = 4;
                 Value * re = (Value *)zalloc(sizeof(Value) * v.u.a->cap);
-                memcpy(re, v.u.a->buf, v.u.a->cap / 2);
+                memcpy(re, v.u.a->buf, oldcap);
+                v.u.a->buf = re;
             }
-            for (size_t i = v.u.a->len + 1; i > index; i--)
+            for (size_t i = v.u.a->len; i > index; i--)
                 v.u.a->buf[i] = v.u.a->buf[i - 1];
             v.u.a->buf[index] = v3;
             v.u.a->len += 1;
@@ -114,7 +118,7 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
             assert2(, v2.tag == VALUE_FLOAT, "Array indexes must be numbers");
             size_t index = v2.u.f;
             assert2(, index >= 0 && index < v.u.a->len, "Array index out of range");
-            frame->stackpos -= 1;
+            frame->stackpos -= 2;
             if (v.u.a->len + 1 >= v.u.a->cap)
             {
                 v.u.a->cap *= 2;
@@ -126,6 +130,24 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
                 v.u.a->buf[i] = v.u.a->buf[i + 1];
             v.u.a->len -= 1;
             STACK_PUSH2(v3)
+        }
+        else panic2(,"Tried to use array_insert_id() on a non-dictionary");
+    }
+    else if (id == dict_remove_id)
+    {
+        assert2(, argcount == 2, "Wrong number of arguments to function");
+        Value v = frame->stack[frame->stackpos - 2];
+        Value v2 = frame->stack[frame->stackpos - 1];
+        if (v.tag == VALUE_DICT)
+        {
+            frame->stackpos -= 2;
+            BiValue * pair = dict_get_or_insert(v.u.d, &v2);
+            Value ret = pair->r;
+            pair->l = val_tagged(VALUE_INVALID);
+            pair->r = val_tagged(VALUE_INVALID);
+            if (ret.tag == VALUE_INVALID) ret = val_tagged(VALUE_NULL);
+            v.u.a->len -= 1;
+            STACK_PUSH2(ret)
         }
         else panic2(,"Tried to use array_insert_id() on a non-dictionary");
     }
@@ -141,6 +163,7 @@ void register_intrinsic_funcs(void)
     REGISTER(keys)
     REGISTER(array_insert)
     REGISTER(array_remove)
+    REGISTER(dict_remove)
 }
 
 #endif

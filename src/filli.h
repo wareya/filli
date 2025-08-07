@@ -831,12 +831,12 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
 
 struct _BiValue;
 typedef struct _Array { struct _Value * buf; size_t len; size_t cap; } Array;
-typedef struct _Dict { struct _BiValue * buf; size_t len; size_t cap; } Dict;
+typedef struct _Dict { struct _BiValue * buf; size_t len; size_t cap; size_t tombs; } Dict;
 
 struct _Frame;
 
 // tag
-enum { VALUE_NULL, VALUE_INVALID, VALUE_FLOAT, VALUE_ARRAY, VALUE_DICT, VALUE_STRING, VALUE_FUNC, VALUE_STATE };
+enum { VALUE_NULL, VALUE_INVALID, VALUE_FLOAT, VALUE_ARRAY, VALUE_DICT, VALUE_STRING, VALUE_FUNC, VALUE_STATE, VALUE_TOMBSTONE = 0x7F, };
 
 typedef struct _Value {
     union { double f; Array * a; Dict * d; char * s; Funcdef * fn; struct _FState * fs; } u;
@@ -891,18 +891,20 @@ void dict_reallocate(Dict * d, size_t newcap)
         newbuf[i] = (BiValue) { val_tagged(VALUE_INVALID), val_tagged(VALUE_INVALID) };
     for (size_t i = 0; i < d->cap; i++)
     {
+        if (d->buf[i].l.tag == VALUE_TOMBSTONE || d->buf[i].l.tag == VALUE_INVALID) continue;
         uint64_t hash = val_hash(&d->buf[i].l) & (newcap - 1);
-        while (newbuf[hash].l.tag == VALUE_INVALID) hash = (hash + 1) & (newcap - 1);
+        while (newbuf[hash].r.tag != VALUE_INVALID && !val_eq(&d->buf[i].l, &newbuf[hash].l)) hash = (hash + 1) & (d->cap - 1);
         newbuf[hash] = (BiValue) { d->buf[i].l, d->buf[i].r };
     }
+    d->tombs = 0;
     d->cap = newcap;
     d->buf = newbuf;
 }
 BiValue * dict_get_or_insert(Dict * d, Value * v)
 {
-    if (d->cap == 0) dict_reallocate(d, 64);
+    if (d->cap == 0) dict_reallocate(d, 1);
     // max 50% load factor
-    if (d->len * 2 > d->cap) dict_reallocate(d, d->cap * 2);
+    if ((d->len + 1 + d->tombs) * 2 > d->cap) dict_reallocate(d, d->cap * 2);
     
     uint64_t hash = val_hash(v) & (d->cap - 1);
     while (d->buf[hash].r.tag != VALUE_INVALID && !val_eq(v, &d->buf[hash].l)) hash = (hash + 1) & (d->cap - 1);
