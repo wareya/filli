@@ -54,7 +54,25 @@ int main(void)
             cursor = input;
             Token * tokens = tokenize(input, &count);
             compile(input, tokens, count, 0);
+            
+            if (filli_err)
+            {
+                fputs("Compiler produced error:\n", stdout);
+                fputs(filli_err, stdout);
+                fputs("\n", stdout);
+                filli_err = 0;
+                continue;
+            }
+            
             pc += interpret(pc);
+            
+            if (filli_err)
+            {
+                fputs("Interpreter produced error:\n", stdout);
+                fputs(filli_err, stdout);
+                fputs("\n", stdout);
+                filli_err = 0;
+            }
         }
         else
             cursor += strlen(cursor);

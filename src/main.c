@@ -54,6 +54,14 @@ int main(int argc, char ** argv)
     Token * tokens = tokenize(source, &count);
     compile(source, tokens, count, 0);
     
+    if (filli_err)
+    {
+        fputs("Compiler produced error:\n", stdout);
+        fputs(filli_err, stdout);
+        fputs("\n", stdout);
+        return 0;
+    }
+
     for (size_t i = 0; i < prog.i; i++)
     {
         printu16hex(prog.code[i]);
@@ -62,5 +70,12 @@ int main(int argc, char ** argv)
     
     interpret(0);
     
+    if (filli_err)
+    {
+        fputs("Interpreter produced error:\n", stdout);
+        fputs(filli_err, stdout);
+        fputs("\n", stdout);
+    }
+
     return 0;
 }
