@@ -164,18 +164,15 @@ Token * tokenize(const char * src, size_t * count)
 
 enum { INST_INVALID = 0x000,
     // zero-op
-    INST_DISCARD = 0x100, PUSH_NULL, PUSH_DICT_EMPTY, INST_RETURN_VAL, INST_RETURN_VOID,
+    INST_DISCARD = 0x100, PUSH_NULL, PUSH_DICT_EMPTY, INST_RETURN_VAL, INST_RETURN_VOID, INST_YIELD,
     INST_ADD, INST_SUB, INST_MUL, INST_DIV, INST_CMP_AND, INST_CMP_OR,
-    INST_CMP_EQ, INST_CMP_NE, INST_CMP_GT, INST_CMP_LT, INST_CMP_GE, INST_CMP_LE,
-    INST_INDEX, INST_INDEX_LOC, INST_SET_LOC,
-    INST_SET_LOC_ADD, INST_SET_LOC_SUB, INST_SET_LOC_MUL, INST_SET_LOC_DIV,
+    INST_SET_LOC, INST_SET_LOC_ADD, INST_SET_LOC_SUB, INST_SET_LOC_MUL, INST_SET_LOC_DIV,
+    INST_INDEX, INST_INDEX_LOC, INST_CMP_EQ, INST_CMP_NE, INST_CMP_GT, INST_CMP_LT, INST_CMP_GE, INST_CMP_LE,
     // 1-op
     PUSH_FUNCNAME = 0x220, INST_FUNCCALL_REF, PUSH_STRING, INST_ARRAY_LITERAL,
     PUSH_LOCAL, PUSH_GLOBAL, PUSH_CAP, INST_SET, INST_SET_GLOBAL, INST_SET_CAP,
-    INST_SET_ADD, INST_SET_GLOBAL_ADD, INST_SET_CAP_ADD,
-    INST_SET_SUB, INST_SET_GLOBAL_SUB, INST_SET_CAP_SUB,
-    INST_SET_MUL, INST_SET_GLOBAL_MUL, INST_SET_CAP_MUL,
-    INST_SET_DIV, INST_SET_GLOBAL_DIV, INST_SET_CAP_DIV,
+    INST_SET_ADD, INST_SET_GLOBAL_ADD, INST_SET_CAP_ADD, INST_SET_SUB, INST_SET_GLOBAL_SUB, INST_SET_CAP_SUB,
+    INST_SET_MUL, INST_SET_GLOBAL_MUL, INST_SET_CAP_MUL, INST_SET_DIV, INST_SET_GLOBAL_DIV, INST_SET_CAP_DIV,
     // 2-op
     INST_JMP = 0x340, INST_JMP_IF_FALSE, INST_JMP_IF_TRUE, INST_FUNCDEF, INST_FUNCCALL,
     // jumps: destination
@@ -689,6 +686,13 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         else        prog_write(INST_RETURN_VAL);
         return r + 1;
     }
+    else if (token_is(source, tokens, count, i, "yield"))
+    {
+        size_t r = compile_expr(source, tokens, count, ++i, 0);
+        if (r == 0) prog_write2(PUSH_NULL, INST_YIELD);
+        else        prog_write(INST_YIELD);
+        return r + 1;
+    }
     else
     {
         size_t r = compile_expr(source, tokens, count, i, 0);
@@ -829,11 +833,13 @@ struct _BiValue;
 typedef struct _Array { struct _Value * buf; size_t len; size_t cap; } Array;
 typedef struct _Dict { struct _BiValue * buf; size_t len; size_t cap; } Dict;
 
+struct _Frame;
+
 // tag
-enum { VALUE_NULL, VALUE_INVALID, VALUE_FLOAT, VALUE_ARRAY, VALUE_DICT, VALUE_STRING, VALUE_FUNC };
+enum { VALUE_NULL, VALUE_INVALID, VALUE_FLOAT, VALUE_ARRAY, VALUE_DICT, VALUE_STRING, VALUE_FUNC, VALUE_STATE };
 
 typedef struct _Value {
-    union { double f; Array * a; Dict * d; char * s; Funcdef * fn; } u;
+    union { double f; Array * a; Dict * d; char * s; Funcdef * fn; struct _FState * fs; } u;
     uint8_t tag;
 } Value;
 typedef struct _BiValue { struct _Value l; struct _Value r; } BiValue;
@@ -842,6 +848,13 @@ Value val_tagged(uint8_t tag) { Value v; memset(&v, 0, sizeof(Value)); v.tag = t
 Value val_float(double f) { Value v = val_tagged(VALUE_FLOAT); v.u.f = f; return v; }
 Value val_string(char * s) { Value v = val_tagged(VALUE_STRING); v.u.s = s; return v; }
 Value val_func(uint16_t id) { Value v = val_tagged(VALUE_FUNC); v.u.fn = &cs->funcs_reg[id]; return v; }
+
+typedef struct _FState { Funcdef * fn; struct _Frame * frame; } FState;
+FState * new_fstate(Funcdef * fn) { FState * r = (FState *)zalloc(sizeof(FState)); r->fn = fn; return r; }
+Value val_funcstate(Funcdef * fn) { Value v = val_tagged(VALUE_STATE); v.u.fs = new_fstate(fn); return v; }
+
+Value val_array(size_t n) { Value v = val_tagged(VALUE_ARRAY); v.u.a = (Array *)zalloc(sizeof(Array));
+    *v.u.a = (Array) { (Value *)zalloc(sizeof(Value) * n), n, n }; return v; }
 
 Value * array_get(Array * a, size_t i) { assert2(0, i < a->len); return a->buf + i; }
 
@@ -918,6 +931,7 @@ typedef struct _Frame {
     Value vars[FRAME_VARCOUNT], stack[FRAME_STACKSIZE];
     double forloops[FORLOOP_COUNT_LIMIT];
     Value ** caps;
+    Funcdef * fn;
 } Frame;
 
 void print_op_and_panic(uint16_t op) { prints("---\n"); printu16hex(op); prints("\n---\n"); panic2(, "Unknown operation"); }
@@ -961,9 +975,7 @@ size_t interpret(size_t from_pc)
         
         NEXT_CASE(INST_ARRAY_LITERAL)
             uint16_t itemcount = prog.code[frame->pc + 1];
-            Value v = val_tagged(VALUE_ARRAY);
-            v.u.a = (Array *)zalloc(sizeof(Array));
-            *v.u.a = (Array) { (Value *)zalloc(sizeof(Value) * itemcount), itemcount, itemcount };
+            Value v = val_array(itemcount);
             while (itemcount > 0) v.u.a->buf[--itemcount] = frame->stack[--frame->stackpos];
             STACK_PUSH(v)
         
@@ -973,6 +985,7 @@ size_t interpret(size_t from_pc)
             {\
                 Frame * prev = frame;\
                 Frame * next = (Frame *)zalloc(sizeof(Frame));\
+                next->fn = fn;\
                 PC_INC();\
                 next->return_to = frame;\
                 frame = next;\
@@ -980,12 +993,11 @@ size_t interpret(size_t from_pc)
                 for (size_t i = fn->argcount; i > 0;)\
                     frame->vars[--i] = prev->stack[--prev->stackpos];\
                 if (fn->cap_data) frame->caps = fn->cap_data; \
-                if (ISREF) prev->stack[--prev->stackpos];\
+                if (ISREF) prev->stackpos -= 1;\
                 frame->pc = fn->loc;\
                 continue;\
             }\
-            handle_intrinsic_func(fn->id, argcount, frame);\
-            frame->stackpos -= argcount; // intrinsics
+            handle_intrinsic_func(fn->id, argcount, frame); // intrinsics
         
         NEXT_CASE(INST_FUNCCALL)
             uint16_t argcount = prog.code[frame->pc + 2];
@@ -995,9 +1007,24 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_FUNCCALL_REF)
             uint16_t argcount = prog.code[frame->pc + 1];
             Value v_func = frame->stack[frame->stackpos - argcount - 1];
-            assert2(0, v_func.tag == VALUE_FUNC);
+            assert2(0, v_func.tag == VALUE_FUNC || v_func.tag == VALUE_STATE);
             Funcdef * fn = v_func.u.fn;
             ENTER_FUNC(1)
+            // for intrinsics, replace funcref with return value
+            frame->stack[frame->stackpos - 2] = frame->stack[frame->stackpos - 1];
+            frame->stackpos -= 1;
+        
+        NEXT_CASE(INST_YIELD)
+            Value v = frame->stack[--frame->stackpos];
+            if (!frame->return_to) { PC_INC(); return frame->pc; }
+            frame = frame->return_to;
+            
+            Value v2 = val_array(2);
+            v2.u.a->buf[0] = v;
+            v2.u.a->buf[1] = val_funcstate(frame->fn);
+            
+            STACK_PUSH(v2)
+            continue;
         
         NEXT_CASE(INST_RETURN_VAL)
             Value v = frame->stack[--frame->stackpos];
