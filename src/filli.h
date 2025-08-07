@@ -851,7 +851,7 @@ Value val_func(uint16_t id) { Value v = val_tagged(VALUE_FUNC); v.u.fn = &cs->fu
 
 typedef struct _FState { Funcdef * fn; struct _Frame * frame; } FState;
 FState * new_fstate(Funcdef * fn) { FState * r = (FState *)zalloc(sizeof(FState)); r->fn = fn; return r; }
-Value val_funcstate(Funcdef * fn) { Value v = val_tagged(VALUE_STATE); v.u.fs = new_fstate(fn); return v; }
+Value val_funcstate(Funcdef * fn, struct _Frame * frame) { Value v = val_tagged(VALUE_STATE); v.u.fs = new_fstate(fn); v.u.fs->frame = frame; return v; }
 
 Value val_array(size_t n) { Value v = val_tagged(VALUE_ARRAY); v.u.a = (Array *)zalloc(sizeof(Array));
     *v.u.a = (Array) { (Value *)zalloc(sizeof(Value) * n), n, n }; return v; }
@@ -947,6 +947,7 @@ size_t interpret(size_t from_pc)
     
     #define CASES_START() \
     while (frame->pc < prog.i) {\
+        repanic(frame->pc)\
         uint16_t op = prog.code[frame->pc];\
         switch (op) {
     #define CASES_END() } }
@@ -960,8 +961,6 @@ size_t interpret(size_t from_pc)
     #define NEXT_CASE(X) END_CASE() MARK_CASE(X)
     
     CASES_START()
-        repanic(frame->pc)
-        
         #define READ_AND_GOTO_TARGET(X)\
             { uint32_t target; memcpy(&target, prog.code + (frame->pc + X), 4); frame->pc = target; continue; }
         
@@ -979,22 +978,21 @@ size_t interpret(size_t from_pc)
             while (itemcount > 0) v.u.a->buf[--itemcount] = frame->stack[--frame->stackpos];
             STACK_PUSH(v)
         
-        #define ENTER_FUNC(ISREF)\
-            assert2(0, fn->exists);\
+        #define ENTER_FUNC(ISREF, FORCE_FRAME)\
+            assert2(0, fn->exists, "Function does not exist");\
             if (!fn->intrinsic)\
             {\
                 Frame * prev = frame;\
-                Frame * next = (Frame *)zalloc(sizeof(Frame));\
+                Frame * next = (FORCE_FRAME) ? (FORCE_FRAME) : (Frame *)zalloc(sizeof(Frame));\
                 next->fn = fn;\
                 PC_INC();\
                 next->return_to = frame;\
                 frame = next;\
                 assert2(0, argcount == fn->argcount, "Function arg count doesn't match");\
-                for (size_t i = fn->argcount; i > 0;)\
-                    frame->vars[--i] = prev->stack[--prev->stackpos];\
-                if (fn->cap_data) frame->caps = fn->cap_data; \
+                if (!(FORCE_FRAME)) for (size_t i = fn->argcount; i > 0;) frame->vars[--i] = prev->stack[--prev->stackpos];\
+                if (!(FORCE_FRAME)) if (fn->cap_data) frame->caps = fn->cap_data; \
+                if (!(FORCE_FRAME)) frame->pc = fn->loc;\
                 if (ISREF) prev->stackpos -= 1;\
-                frame->pc = fn->loc;\
                 continue;\
             }\
             handle_intrinsic_func(fn->id, argcount, frame); // intrinsics
@@ -1002,26 +1000,28 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_FUNCCALL)
             uint16_t argcount = prog.code[frame->pc + 2];
             Funcdef * fn = &cs->funcs_reg[prog.code[frame->pc + 1]];
-            ENTER_FUNC(0)
+            ENTER_FUNC(0, 0)
         
         NEXT_CASE(INST_FUNCCALL_REF)
             uint16_t argcount = prog.code[frame->pc + 1];
             Value v_func = frame->stack[frame->stackpos - argcount - 1];
-            assert2(0, v_func.tag == VALUE_FUNC || v_func.tag == VALUE_STATE);
-            Funcdef * fn = v_func.u.fn;
-            ENTER_FUNC(1)
+            assert2(0, v_func.tag == VALUE_FUNC || v_func.tag == VALUE_STATE, "Tried to call a non-function");
+            Funcdef * fn = v_func.tag == VALUE_FUNC ? v_func.u.fn : v_func.u.fs->fn;
+            ENTER_FUNC(1, v_func.tag == VALUE_FUNC ? 0 : v_func.u.fs->frame)
             // for intrinsics, replace funcref with return value
             frame->stack[frame->stackpos - 2] = frame->stack[frame->stackpos - 1];
             frame->stackpos -= 1;
         
         NEXT_CASE(INST_YIELD)
-            Value v = frame->stack[--frame->stackpos];
-            if (!frame->return_to) { PC_INC(); return frame->pc; }
-            frame = frame->return_to;
+            PC_INC();
             
+            Value v = frame->stack[--frame->stackpos];
             Value v2 = val_array(2);
             v2.u.a->buf[0] = v;
-            v2.u.a->buf[1] = val_funcstate(frame->fn);
+            v2.u.a->buf[1] = val_funcstate(frame->fn, frame);
+            
+            if (!frame->return_to) return frame->pc;
+            frame = frame->return_to;
             
             STACK_PUSH(v2)
             continue;

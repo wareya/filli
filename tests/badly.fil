@@ -14,8 +14,28 @@ func asdf2():
     return 5
 end
 
+print("#-#-#-#-#")
+
 let rv = asdf2()
 print(rv[1])
 print(typeof(rv))
 print(typeof(rv[0]))
 print(typeof(rv[1]))
+
+print(rv)
+print(rv[0])
+
+let rv2 = rv[1]()
+print(rv2)
+print(rv2[0])
+
+rv2 = rv2[1]()
+print(rv2)
+print(rv2[0])
+
+rv2 = rv2[1]()
+print(rv2)
+print(rv2[0])
+
+rv2 = rv2[1]()
+print(rv2)
