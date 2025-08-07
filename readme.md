@@ -77,6 +77,28 @@ f()
 # 2.280000000
 ```
 
+Generator coroutines:
+
+```python
+func asdf2():
+    yield 3  yield 1  yield 4  yield 1  return 5
+end
+
+let rv = asdf2()
+
+print(rv[0]) rv = rv[1]()  
+print(rv[0]) rv = rv[1]()  
+print(rv[0]) rv = rv[1]()  
+print(rv[0]) rv = rv[1]()  
+print(rv)
+# prints:
+# 3.000000000
+# 1.000000000
+# 4.000000000
+# 1.000000000
+# 5.000000000
+```
+
 Strings, arrays, and dicts:
 
 ```python

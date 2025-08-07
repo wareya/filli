@@ -7,35 +7,13 @@ asdf()
 print(6)
 
 func asdf2():
-    yield 3
-    yield 1
-    yield 4
-    yield 1
-    return 5
+    yield 3  yield 1  yield 4  yield 1  return 5
 end
 
-print("#-#-#-#-#")
-
 let rv = asdf2()
-print(rv[1])
-print(typeof(rv))
-print(typeof(rv[0]))
-print(typeof(rv[1]))
 
+print(rv[0]) rv = rv[1]()  
+print(rv[0]) rv = rv[1]()  
+print(rv[0]) rv = rv[1]()  
+print(rv[0]) rv = rv[1]()  
 print(rv)
-print(rv[0])
-
-let rv2 = rv[1]()
-print(rv2)
-print(rv2[0])
-
-rv2 = rv2[1]()
-print(rv2)
-print(rv2[0])
-
-rv2 = rv2[1]()
-print(rv2)
-print(rv2[0])
-
-rv2 = rv2[1]()
-print(rv2)
