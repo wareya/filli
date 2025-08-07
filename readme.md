@@ -76,7 +76,30 @@ f()
 # 4.140000000
 # 3.210000000
 # 2.280000000
+```
 
+Strings, arrays, and dicts:
+
+```python
+let array = [3,1,4,5];
+print(array[2]);
+array[2] += 3;
+print(array[2]);
+array[2] = 1.414;
+print(array[2]);
+
+let string = "Hello, world!"
+print(string)
+string[0] = "h"
+print(string)
+string[6] = "_"
+print(string)
+
+let dict = {}
+print(dict)
+print(dict["a"])
+dict["a"] = 429.351293;
+print(dict["a"])
 ```
 
 ## Integration
