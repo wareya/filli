@@ -37,13 +37,13 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
         
         int tag = frame->stack[frame->stackpos - 1].tag;
         frame->stackpos -= 1;
-        if      (tag == VALUE_FLOAT)    STACK_PUSH2(val_string("float"))
-        else if (tag == VALUE_STRING)   STACK_PUSH2(val_string("string"))
-        else if (tag == VALUE_ARRAY)    STACK_PUSH2(val_string("array"))
-        else if (tag == VALUE_DICT)     STACK_PUSH2(val_string("dict"))
-        else if (tag == VALUE_FUNC)     STACK_PUSH2(val_string("funcref"))
-        else if (tag == VALUE_STATE)    STACK_PUSH2(val_string("funcstate"))
-        else if (tag == VALUE_NULL)     STACK_PUSH2(val_string("null"))
+        if      (tag == VALUE_FLOAT)    STACK_PUSH2(val_string(stringdup("float")))
+        else if (tag == VALUE_STRING)   STACK_PUSH2(val_string(stringdup("string")))
+        else if (tag == VALUE_ARRAY)    STACK_PUSH2(val_string(stringdup("array")))
+        else if (tag == VALUE_DICT)     STACK_PUSH2(val_string(stringdup("dict")))
+        else if (tag == VALUE_FUNC)     STACK_PUSH2(val_string(stringdup("funcref")))
+        else if (tag == VALUE_STATE)    STACK_PUSH2(val_string(stringdup("funcstate")))
+        else if (tag == VALUE_NULL)     STACK_PUSH2(val_string(stringdup("null")))
     }
     else if (id == len_id)
     {

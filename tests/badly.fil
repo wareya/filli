@@ -42,3 +42,27 @@ print(a2[2])
 for i in len(a2):
     print(a2[i], d[a2[i]])
 end
+
+func foreach(x, f):
+    let type = typeof(x)
+    if type == "array" or type == "string":
+        for i in len(x): f(x[i]) end
+    elif type == "dict":
+        let k = keys(x)
+        for i in len(k): f(k[i]) end
+    end
+end
+
+print()
+
+foreach([6.153, 4, 5, 1, 3, 52.13], lambda[](x):
+    print(x)
+end )
+
+foreach("Hello!", lambda[](x):
+    print(x)
+end )
+
+foreach(d, lambda[](x):
+    print(x, d[x])
+end )
