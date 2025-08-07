@@ -63,6 +63,11 @@ foreach("Hello!", lambda[](x):
     print(x)
 end )
 
+let d = {}
+d["a"] = 591
+d[5] = 4
+d[8] # accessing a dict field automatically fills it with null if it doesn't exist yet
+
 foreach(d, lambda[](x):
     print(x, d[x])
 end )

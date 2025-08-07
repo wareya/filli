@@ -123,6 +123,45 @@ dict["a"] = 429.351293;
 print(dict["a"])
 ```
 
+Functional programming:
+
+```python
+
+foreach([6.153, 4, 5, 1, 3, 52.13], lambda[](x):
+    print(x)
+end )
+
+foreach("Hello!", lambda[](x):
+    print(x)
+end )
+
+let d = {}
+d["a"] = 591
+d[5] = 4
+d[8] # accessing a dict field automatically fills it with null if it doesn't exist yet
+
+foreach(d, lambda[](x):
+    print(x, d[x])
+end )
+
+# prints:
+# 6.153000000
+# 4.000000000
+# 5.000000000
+# 1.000000000
+# 3.000000000
+# 52.13000000
+# H
+# e
+# l
+# l
+# o
+# !
+# a 591.0000000
+# 5.000000000 4.000000000
+# 8.000000000 null
+```
+
 ## Integration
 
 Include `filli.h` in your project, as well as `intrinsics.h` and `microlib.h`. Add `#include "filli.h"` or similar to a SINGLE translation unit in your project and then re-expose it from there.
