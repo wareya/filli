@@ -6,17 +6,15 @@
 // - rewrite intrinsics.h, adding whatever functionality you need (e.g. trig, array insert/delete/splice)
 // - skim microlib.h, consider replacing it with thin stdlib wrappers
 
-#define IDENTIFIER_COUNT 32000 // max number of uniquely-spelled identifiers per prog.code
+#define IDENTIFIER_COUNT 32000 // max number of uniquely-spelled identifiers per program
 #define FRAME_VARCOUNT 1024 // increases memory usage of stack frames
 #define FRAME_STACKSIZE 1024 // increases memory usage of stack frames
-#define PROGRAM_MAXLEN 100000 // default max length of prog.code
+#define PROGRAM_MAXLEN 100000 // default max length of program
 #define FORLOOP_COUNT_LIMIT 255 // increases memory usage of stack frames
 #define ARGLIMIT 255 // affects risk of stack smashing during compilation
 #define ELIFLIMIT 255 // affects risk of stack smashing during compilation
 #define CAPTURELIMIT 255
 #define LAMBDA_COUNT 4096
-
-// OTHER LIMITS
 
 // this library just does stuff that the stdlib does but with less stdlib involvement
 // why? smaller statically linked (e.g. musl) binaries. yes, the difference is significant!
@@ -31,7 +29,7 @@ const char * filli_err = 0;
 
 void * zalloc(size_t s) { char * r = (char *)malloc(s); if (!r) panic("Out of memory"); memset(r, 0, s); return r; }
 
-// actual prog.code
+// actual program
 
 typedef struct _IdEntry { const char * where; uint16_t len; } IdEntry;
 
