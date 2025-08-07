@@ -63,12 +63,10 @@ int token_is(const char * source, Token * tokens, size_t count, size_t i, const 
 
 Token mk_token(uint32_t i, uint16_t len, int16_t kind) { Token t = {i, len, kind}; return t; }
 
-int lex_ident_offset = 0;
-
 void lex_init(void)
 {
     // give keywords known ids
-    const char * keywords[] = { "if", "else", "elif", "func", "while", "for", "break", "continue", "return", "let", "end", "lambda"};
+    const char * keywords[] = { "if", "else", "elif", "func", "while", "for", "break", "continue", "return", "let", "end", "lambda", "yield"};
     for (size_t j = 0; j < sizeof(keywords) / sizeof(keywords[0]); j++)
         insert_or_lookup_id(keywords[j], strlen(keywords[j]));
 
@@ -84,10 +82,9 @@ void lex_init(void)
     // 10: let
     // 11: end
     // 12: lambda
-    
-    lex_ident_offset = 12;
+    // 13: lambda
 }
-#define MIN_KEYWORD -12
+int lex_ident_offset = 13;
 
 Token * tokenize(const char * src, size_t * count)
 {
@@ -206,21 +203,12 @@ void prog_write5(uint16_t a, uint16_t b, uint16_t c, uint16_t d, uint16_t e)
 int tokenop_bindlevel(const char * source, Token * tokens, size_t count, size_t i)
 {
     if (i >= count) return -1;
-    
-    if (token_is(source, tokens, count, i, "or")) return 1;
-    if (token_is(source, tokens, count, i, "and")) return 2;
-    if (token_is(source, tokens, count, i, "==")) return 3;
-    if (token_is(source, tokens, count, i, "!=")) return 3;
-    if (token_is(source, tokens, count, i, ">=")) return 3;
-    if (token_is(source, tokens, count, i, "<=")) return 3;
-    if (token_is(source, tokens, count, i, ">")) return 3;
-    if (token_is(source, tokens, count, i, "<")) return 3;
-    if (token_is(source, tokens, count, i, "+")) return 4;
-    if (token_is(source, tokens, count, i, "-")) return 4;
-    if (token_is(source, tokens, count, i, "*")) return 5;
-    if (token_is(source, tokens, count, i, "/")) return 5;
-    if (token_is(source, tokens, count, i, "[")) return 500;
-    if (token_is(source, tokens, count, i, "(")) return 500;
+    const char * ops[] = {
+        "or", "\1", "and", "\1", "==", "\3", "!=", "\3", ">=", "\3", "<=", "\3", ">", "\3", "<", "\3",
+        "+", "\4", "-", "\4", "*", "\5", "/", "\5", "[", "\111", "(", "\111"
+    };
+    for (size_t j = 0; j < sizeof(ops) / sizeof(ops[0]); j += 2)
+        if (token_is(source, tokens, count, i, ops[j])) return ops[j + 1][0];
     return -1;
 }
 
@@ -270,7 +258,7 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
     if (token_is(source, tokens, count, i, "{}")) return prog_write(PUSH_DICT_EMPTY), 1;
     
     if (tokens[i].kind > 1) return 0;
-    if (tokens[i].kind < 0 && tokens[i].kind >= MIN_KEYWORD) return 0;
+    if (tokens[i].kind < 0 && tokens[i].kind >= -lex_ident_offset) return 0;
     
     if (tokens[i].kind < 0)
     {
@@ -370,7 +358,7 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
         int16_t * caps = (int16_t *)zalloc(sizeof(int16_t) * CAPTURELIMIT);
         uint16_t * caps_reg_next = (uint16_t *)zalloc(sizeof(uint16_t) * IDENTIFIER_COUNT);
         PARSE_COMMALIST("]", return 0, return 0, assert2(0, j < CAPTURELIMIT),
-            if (tokens[i].kind >= MIN_KEYWORD) return 0;
+            if (tokens[i].kind >= -lex_ident_offset) return 0;
             int16_t id = lex_ident_offset - tokens[i++].kind;
             int16_t accessor_id = 0;
             if      (cs->func_depth > 0 && cs->locals_reg[id])   accessor_id = cs->locals_reg[id] - 1;
@@ -753,7 +741,7 @@ size_t compile_register_func(const char * source, Token * tokens, size_t count, 
     uint16_t args[ARGLIMIT];
     PARSE_COMMALIST(")", panic2(0, "Invalid funcdef"), panic2(0, "Invalid funcdef"),
                     assert2(0, j < ARGLIMIT, "Too many arguments to function"),
-        if (tokens[i].kind >= MIN_KEYWORD) panic2(0, "Invalid funcdef");
+        if (tokens[i].kind >= -lex_ident_offset) panic2(0, "Invalid funcdef");
         args[j] = lex_ident_offset - tokens[i++].kind;
         cs->locals_reg[args[j]] = ++cs->locals_n;
     )
@@ -776,7 +764,7 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
 {
     size_t orig_i = i;
     if (i >= count) return 0;
-    if (tokens[i].kind >= MIN_KEYWORD) return 0;
+    if (tokens[i].kind >= -lex_ident_offset) return 0;
     int16_t id = lex_ident_offset - tokens[i++].kind;
     
     prog_write3(INST_FUNCDEF, 0, 0);
