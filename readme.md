@@ -6,7 +6,7 @@ Embeddable, header-only, not horribly slow, and configurable. The reference `.fi
 
 Depending on compiler flags, the microbenchmarks I've tested vary from 35% to 50% the runtime of the Lua equivalent. Lua is a very fast interpreter, so this means that Filli isn't horribly inefficient.
 
-Filli is meant to be used with BDWGC (aka Boehm GC) or some similar interior-pointer-aware conservative GC. If your Filli threads are only ever going to be short lived, you can #define NO_GC before including it to disable all the GC stuff.
+Filli is meant to be used with BDWGC (aka Boehm GC) or some similar interior-pointer-aware conservative GC; it intentionally leaks memory to avoid the cost (both runtime and code size) of refcounting.
 
 ## Features
 
@@ -121,7 +121,7 @@ Read `microlib.h` and consider replacing it with wrappers around stdlib function
 
 If you need to add more predefined functions, add them in `intrinsics.h`.
 
-Filli uses assertions to validate that it's not about to do something invalid or memory-unsafe, so if you accept user-defined scripts, run it on a separate thread and check for premature termination.
+Filli has not been fuzzed, but makes an effort to avoid doing anything stupidly unsafe (i.e. it does bounds checks and zero-initializes everything).
 
 ## License
 
