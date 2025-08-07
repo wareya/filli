@@ -127,7 +127,13 @@ print(dict["a"])
 
 Include `filli.h` in your project, as well as `intrinsics.h` and `microlib.h`. Add `#include "filli.h"` or similar to a SINGLE translation unit in your project and then re-expose it from there.
 
-**Filli intentionally leaks memory!** You should include libgc / BDWGC before including `filli.h`, like so:
+**Filli intentionally leaks memory!**
+
+**Filli intentionally leaks memory!**
+
+**Filli intentionally leaks memory!**
+
+You should include libgc / BDWGC before including `filli.h`, like so:
 
 ```c
 #include <gc.h>
