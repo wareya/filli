@@ -21,8 +21,8 @@
 #include "microlib.h"
 
 const char * filli_err = 0;
-#define assert2(N, X, ...) { if (!(X)) { if (__VA_OPT__(1)+0) filli_err = #__VA_ARGS__; else filli_err = #X; return N; } }
-//#define assert2(N, X, ...) assert(X, __VA_ARGS__)
+//#define assert2(N, X, ...) { if (!(X)) { if (__VA_OPT__(1)+0) filli_err = #__VA_ARGS__; else filli_err = #X; return N; } }
+#define assert2(N, X, ...) assert(X, __VA_ARGS__)
 #define panic2(N, X) { filli_err = #X; return N; }
 //#define panic2(N, X) panic(X)
 #define repanic(N) { if (filli_err) return N; }
@@ -442,7 +442,7 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
         return i - orig_i;
     }
     
-    size_t r = compile_expr(source, tokens, count, i + 1, binding_power < 500 ? binding_power : 0);
+    size_t r = compile_expr(source, tokens, count, i + 1, binding_power < 50 ? binding_power : 0);
     if (r == 0) return 0;
     
     uint16_t inst;
@@ -460,6 +460,7 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
     else if (token_is(source, tokens, count, i, "or")) inst = INST_CMP_OR;
     else if (token_is(source, tokens, count, i, "["))
     {
+        printf("? %d\n", r);
         inst = INST_INDEX;
         i += ++r;
         assert2(0, token_is(source, tokens, count, i++, "]"));

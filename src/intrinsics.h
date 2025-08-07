@@ -15,9 +15,10 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
     {
         for (size_t i = 0; i < argcount; i++)
         {
-            int tag = frame->stack[frame->stackpos - 1 - i].tag;
-            if      (tag == VALUE_FLOAT)    prints(baddtostr(frame->stack[frame->stackpos - 1 - i].u.f));
-            else if (tag == VALUE_STRING)   prints(frame->stack[frame->stackpos - 1 - i].u.s);
+            ptrdiff_t offs = i - argcount;
+            int tag = frame->stack[frame->stackpos + offs].tag;
+            if      (tag == VALUE_FLOAT)    prints(baddtostr(frame->stack[frame->stackpos + offs].u.f));
+            else if (tag == VALUE_STRING)   prints(frame->stack[frame->stackpos + offs].u.s);
             else if (tag == VALUE_ARRAY)    prints("<array>");
             else if (tag == VALUE_DICT)     prints("<dict>");
             else if (tag == VALUE_FUNC)     prints("<func>");
