@@ -6,10 +6,10 @@
 // - rewrite intrinsics.h, adding whatever functionality you need (e.g. trig, array insert/delete/splice)
 // - skim microlib.h, consider replacing it with thin stdlib wrappers
 
-#define IDENTIFIER_COUNT 32000 // max number of uniquely-spelled identifiers per program
+#define IDENTIFIER_COUNT 32000 // max number of uniquely-spelled identifiers per prog.code
 #define FRAME_VARCOUNT 1024 // increases memory usage of stack frames
 #define FRAME_STACKSIZE 1024 // increases memory usage of stack frames
-#define PROGRAM_MAXLEN 100000 // default max length of program
+#define PROGRAM_MAXLEN 100000 // default max length of prog.code
 #define FORLOOP_COUNT_LIMIT 255 // increases memory usage of stack frames
 #define ARGLIMIT 255 // affects risk of stack smashing during compilation
 #define ELIFLIMIT 255 // affects risk of stack smashing during compilation
@@ -24,7 +24,7 @@
 
 void * zalloc(size_t s) { char * r = (char *)malloc(s); memset(r, 0, s); return r; }
 
-// actual program
+// actual prog.code
 
 typedef struct _IdEntry { const char * where; uint16_t len; } IdEntry;
 
@@ -189,13 +189,11 @@ enum {
     // INST_LAMBDA: func id (4), destination(4)
 };
 
-// TODO: make non-global
-uint16_t * program = 0;
-uint32_t prog_capacity = PROGRAM_MAXLEN;
-void init_program() { program = zalloc(sizeof(uint16_t) * prog_capacity); }
-uint32_t prog_i = 0;
+typedef struct _Program { uint16_t * code; uint32_t capacity; uint32_t i; } Program;
+Program prog = (Program) {0, PROGRAM_MAXLEN, 0};
+void init_program() { prog.code = zalloc(sizeof(uint16_t) * prog.capacity); }
 
-void prog_write(uint16_t a) { program[prog_i++] = a; }
+void prog_write(uint16_t a) { prog.code[prog.i++] = a; }
 void prog_add(size_t n) { for (size_t i = 0; i < n; i++) prog_write(0); }
 void prog_write2(uint16_t a, uint16_t b) { prog_write(a); prog_write(b); }
 void prog_write3(uint16_t a, uint16_t b, uint16_t c) { prog_write(a); prog_write(b); prog_write(c); }
@@ -234,26 +232,32 @@ typedef struct _Funcdef {
     struct _Value ** cap_data;
 } Funcdef;
 
-const char * compiled_strings[1<<16] = {};
-uint16_t compiled_string_i = 0;
+typedef struct _CompilerData {
+    const char * compiled_strings[1<<16];
+    uint16_t globals_registered[IDENTIFIER_COUNT];
+    Funcdef funcs_registered[IDENTIFIER_COUNT + LAMBDA_COUNT];
+    
+    uint32_t lambda_id;
+    uint32_t compiled_string_i, locals_reg_i, globals_n, locals_n, caps_reg_i, for_loop_index, func_depth;
 
-uint8_t func_depth = 0;
-Funcdef funcs_registered[IDENTIFIER_COUNT + LAMBDA_COUNT] = {};
-uint32_t lambda_id = IDENTIFIER_COUNT;
+    uint16_t * locals_registered, * caps_registered;
+    uint16_t * locals_reg_stack[1024], * caps_reg_stack[1024];
+    
+    uint32_t loop_nesting, loop_cont_i, loop_break_i;
+    uint32_t loop_conts[1024], loop_breaks[1024];
+} CompilerState;
 
-uint8_t globals_registered[IDENTIFIER_COUNT] = {};
-uint32_t globals_n = 0;
-
-uint16_t * locals_registered;
-uint32_t locals_n = 0;
-uint16_t * locals_reg_stack[1024] = {};
-size_t locals_reg_i = 0;
-
-uint16_t * caps_registered;
-uint16_t * caps_reg_stack[1024] = {};
-size_t caps_reg_i = 0;
-
-uint8_t for_loop_index = 0;
+CompilerState * cs;
+void compiler_state_init(void)
+{
+    cs = (CompilerState *)malloc(sizeof(CompilerState));
+    *cs = (CompilerState) {
+        {}, {}, {},
+        IDENTIFIER_COUNT, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, {}, {},
+        0, 0, 0, {}, {},
+    };
+}
 
 // returns number of consumed tokens
 size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t i)
@@ -274,13 +278,13 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
             return prog_write5(PUSH_NUM, 0, 0, 0, 0), 1;
         else if (token_is(source, tokens, count, i, "null"))
             return prog_write(PUSH_NULL), 1;
-        else if (func_depth > 0 && locals_registered[id])
-            prog_write2(PUSH_LOCAL, locals_registered[id] - 1);
-        else if (func_depth > 0 && caps_registered[id])
-            prog_write2(PUSH_CAP, caps_registered[id] - 1);
-        else if (globals_registered[id])
-            prog_write2(PUSH_GLOBAL, globals_registered[id] - 1);
-        else if (funcs_registered[id].exists)
+        else if (cs->func_depth > 0 && cs->locals_registered[id])
+            prog_write2(PUSH_LOCAL, cs->locals_registered[id] - 1);
+        else if (cs->func_depth > 0 && cs->caps_registered[id])
+            prog_write2(PUSH_CAP, cs->caps_registered[id] - 1);
+        else if (cs->globals_registered[id])
+            prog_write2(PUSH_GLOBAL, cs->globals_registered[id] - 1);
+        else if (cs->funcs_registered[id].exists)
             prog_write2(PUSH_FUNCNAME, id);
         else
         {
@@ -305,9 +309,9 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
             else s[j++] = sold[i];
         }
         s[j] = 0;
-        compiled_strings[compiled_string_i] = s;
-        prog_write2(PUSH_STRING, compiled_string_i++);
-        assert(compiled_string_i != 0, "Too many string literals used in program, limit is 65k");
+        cs->compiled_strings[cs->compiled_string_i] = s;
+        prog_write2(PUSH_STRING, cs->compiled_string_i++);
+        assert(cs->compiled_string_i < (1<<16), "Too many string literals used in prog.code, limit is 65k");
     }
     else if (tokens[i].kind == 0)
     {
@@ -316,7 +320,7 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
         free(s);
         
         prog_write5(PUSH_NUM, 0, 0, 0, 0);
-        memcpy(program + (prog_i - 4), &f, 8);
+        memcpy(prog.code + (prog.i - 4), &f, 8);
     }
     
     return 1;
@@ -335,24 +339,22 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
 
 void compile_func_start(void)
 {
-    func_depth += 1;
-    locals_reg_stack[locals_reg_i++] = locals_registered;
-    locals_registered = (uint16_t *)zalloc(sizeof(uint16_t) * IDENTIFIER_COUNT);
-    caps_reg_stack[caps_reg_i++] = caps_registered;
-    caps_registered = (uint16_t *)zalloc(sizeof(uint16_t) * IDENTIFIER_COUNT);
-    assert(caps_reg_i < 1024 && locals_reg_i < 1024);
+    cs->func_depth += 1;
+    cs->locals_reg_stack[cs->locals_reg_i++] = cs->locals_registered;
+    cs->locals_registered = (uint16_t *)zalloc(sizeof(uint16_t) * IDENTIFIER_COUNT);
+    cs->caps_reg_stack[cs->caps_reg_i++] = cs->caps_registered;
+    cs->caps_registered = (uint16_t *)zalloc(sizeof(uint16_t) * IDENTIFIER_COUNT);
+    assert(cs->caps_reg_i < 1024 && cs->locals_reg_i < 1024);
 }
 void compile_func_end(void)
 {
-    free(locals_registered);
-    locals_registered = locals_reg_stack[--locals_reg_i];
-    free(caps_registered);
-    caps_registered = caps_reg_stack[--caps_reg_i];
-    func_depth -= 1;
+    free(cs->locals_registered);
+    cs->locals_registered = cs->locals_reg_stack[--cs->locals_reg_i];
+    free(cs->caps_registered);
+    cs->caps_registered = cs->caps_reg_stack[--cs->caps_reg_i];
+    cs->func_depth -= 1;
 }
 size_t compile_lambda(const char * source, Token * tokens, size_t count, size_t i, int16_t * caps, uint16_t caps_count);
-
-uint16_t active_captures[CAPTURELIMIT];
 
 size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size_t i)
 {
@@ -368,8 +370,8 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
             if (tokens[i].kind >= MIN_KEYWORD) return 0;
             int16_t id = lex_ident_offset - tokens[i++].kind;
             int16_t accessor_id = 0;
-            if      (func_depth > 0 && locals_registered[id])   accessor_id = locals_registered[id] - 1;
-            else if (func_depth > 0 && caps_registered  [id])   accessor_id = caps_registered[id] - 1; // FIXME: ???
+            if      (cs->func_depth > 0 && cs->locals_registered[id])   accessor_id = cs->locals_registered[id] - 1;
+            else if (cs->func_depth > 0 && cs->caps_registered  [id])   accessor_id = cs->caps_registered[id] - 1; // FIXME: ???
             else
             {
                 printsn(source + tokens[i - 1].i, tokens[i - 1].len);
@@ -380,15 +382,15 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
             caps_registered_next[id] = j + 1;
         )
         
-        uint32_t prev_locals_n = locals_n;
-        locals_n = 0;
+        uint32_t prev_locals_n = cs->locals_n;
+        cs->locals_n = 0;
         compile_func_start();
         
-        memcpy(caps_registered, caps_registered_next, sizeof(uint16_t) * IDENTIFIER_COUNT);
+        memcpy(cs->caps_registered, caps_registered_next, sizeof(uint16_t) * IDENTIFIER_COUNT);
         size_t r = compile_lambda(source, tokens, count, i, caps, j);
         
         compile_func_end();
-        locals_n = prev_locals_n ;
+        cs->locals_n = prev_locals_n ;
         
         if (r == 0) panic("Lambda body is invalid");
         
@@ -482,12 +484,6 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
 
 size_t compile_statementlist(const char * source, Token * tokens, size_t count, size_t i);
 
-size_t loop_nesting = 0;
-uint32_t loop_conts[10000] = {};
-size_t loop_cont_i = 0;
-uint32_t loop_breaks[10000] = {};
-size_t loop_break_i = 0;
-
 size_t compile_statement(const char * source, Token * tokens, size_t count, size_t i)
 {
     if (i >= count) return 0;
@@ -497,12 +493,12 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         i += compile_expr(source, tokens, count, i + 1, 0) + 1;
         assert(token_is(source, tokens, count, i++, ":"));
         prog_write3(INST_JMP_IF_FALSE, 0, 0);
-        size_t jump_at = prog_i - 2;
+        size_t jump_at = prog.i - 2;
         
         i += compile_statementlist(source, tokens, count, i);
         
-        uint32_t end = prog_i + ((tokens[i].kind == -3 || tokens[i].kind == -2) ? 3 : 0);
-        memcpy(program + jump_at, &end, 4);
+        uint32_t end = prog.i + ((tokens[i].kind == -3 || tokens[i].kind == -2) ? 3 : 0);
+        memcpy(prog.code + jump_at, &end, 4);
         
         uint32_t skips[ELIFLIMIT] = {};
         size_t skip_i = 0;
@@ -511,7 +507,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         {
             // add on to previous block: skip this and the rest of the blocks
             prog_write3(INST_JMP, 0, 0);
-            skips[skip_i++] = prog_i - 2;
+            skips[skip_i++] = prog.i - 2;
             assert(skip_i < ELIFLIMIT-1, "Too many elifs in if-else chain");
             
             if (tokens[i].kind == -3) // elif
@@ -519,12 +515,12 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
                 i += compile_expr(source, tokens, count, i + 1, 0) + 1;
                 assert(token_is(source, tokens, count, i++, ":"));
                 prog_write3(INST_JMP_IF_FALSE, 0, 0);
-                size_t jump_at = prog_i - 2;
+                size_t jump_at = prog.i - 2;
                 
                 i += compile_statementlist(source, tokens, count, i);
                 
-                uint32_t end = prog_i + ((tokens[i].kind == -3 || tokens[i].kind == -2) ? 3 : 0);
-                memcpy(program + jump_at, &end, 4);
+                uint32_t end = prog.i + ((tokens[i].kind == -3 || tokens[i].kind == -2) ? 3 : 0);
+                memcpy(prog.code + jump_at, &end, 4);
             }
             else
             {
@@ -534,39 +530,41 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
             }
         }
         assert(tokens[i].kind == -11, "Missing end keyword");
-        uint32_t real_end = prog_i;
-        while (skip_i > 0) memcpy(program + skips[--skip_i], &real_end, 4);
+        uint32_t real_end = prog.i;
+        while (skip_i > 0) memcpy(prog.code + skips[--skip_i], &real_end, 4);
         return i + 1 - orig_i;
     }
     if (tokens[i].kind == -5) // while
     {
-        loop_nesting++;
-        size_t loop_cont_base = loop_cont_i;
-        size_t loop_break_base = loop_break_i;
+        cs->loop_nesting++;
+        size_t loop_cont_base = cs->loop_cont_i;
+        size_t loop_break_base = cs->loop_break_i;
         
         size_t expr_i = i + 1;
         i += compile_expr(source, tokens, count, expr_i, 0) + 1;
         assert(token_is(source, tokens, count, i++, ":"));
         prog_write3(INST_JMP_IF_FALSE, 0, 0);
-        size_t skip_at = prog_i - 2;
-        uint32_t loop_at = prog_i;
+        size_t skip_at = prog.i - 2;
+        uint32_t loop_at = prog.i;
         
         i += compile_statementlist(source, tokens, count, i);
         assert(i < count);
         assert(tokens[i].kind == -11, "Missing end keyword"); // end
         
-        uint32_t cont_to = prog_i;
+        uint32_t cont_to = prog.i;
         compile_expr(source, tokens, count, expr_i, 0); // recompile test expr
         prog_write3(INST_JMP_IF_TRUE, 0, 0);
-        memcpy(program + (prog_i - 2), &loop_at, 4);
+        memcpy(prog.code + (prog.i - 2), &loop_at, 4);
         
-        uint32_t end = prog_i;
-        memcpy(program + skip_at, &end, 4);
+        uint32_t end = prog.i;
+        memcpy(prog.code + skip_at, &end, 4);
         
-        uint32_t break_to = prog_i;
-        while (loop_break_i > loop_break_base) memcpy(program + loop_breaks[--loop_break_i], &break_to, 4);
-        while (loop_cont_i  > loop_cont_base ) memcpy(program + loop_conts [--loop_cont_i ], &cont_to , 4);
-        loop_nesting--;
+        uint32_t break_to = prog.i;
+        while (cs->loop_break_i > loop_break_base)
+            memcpy(prog.code + cs->loop_breaks[--cs->loop_break_i], &break_to, 4);
+        while (cs->loop_cont_i  > loop_cont_base )
+            memcpy(prog.code + cs->loop_conts [--cs->loop_cont_i ], &cont_to , 4);
+        cs->loop_nesting--;
         
         return i + 1- orig_i;
     }
@@ -575,16 +573,16 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         if (++i >= count) return 0;
         int16_t id = lex_ident_offset - tokens[i++].kind;
         
-        if (func_depth == 0) globals_registered[id] = ++globals_n;
-        else                 locals_registered [id] = ++locals_n;
-        assert(globals_n < FRAME_VARCOUNT && locals_n < FRAME_VARCOUNT);
+        if (cs->func_depth == 0) cs->globals_registered[id] = ++cs->globals_n;
+        else                 cs->locals_registered [id] = ++cs->locals_n;
+        assert(cs->globals_n < FRAME_VARCOUNT && cs->locals_n < FRAME_VARCOUNT);
         
         if (token_is(source, tokens, count, i, "="))
         {
             size_t r = compile_expr(source, tokens, count, i + 1, 0);
             if (!r) return i - orig_i;
             i += r + 1;
-            prog_write2(INST_SET + (func_depth == 0), (func_depth == 0) ? globals_n - 1 : locals_n - 1);
+            prog_write2(INST_SET + (cs->func_depth == 0), (cs->func_depth == 0) ? cs->globals_n - 1 : cs->locals_n - 1);
         }
         return i - orig_i;
     }
@@ -592,42 +590,44 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
     {
         if (++i >= count) return 0;
         
-        loop_nesting++;
-        size_t loop_cont_base = loop_cont_i;
-        size_t loop_break_base = loop_break_i;
+        cs->loop_nesting++;
+        size_t loop_cont_base = cs->loop_cont_i;
+        size_t loop_break_base = cs->loop_break_i;
         
         int16_t id = lex_ident_offset - tokens[i++].kind;
-        if (func_depth == 0) globals_registered[id] = ++globals_n;
-        else                 locals_registered [id] = ++locals_n;
-        assert(globals_n < FRAME_VARCOUNT && locals_n < FRAME_VARCOUNT);
+        if (cs->func_depth == 0) cs->globals_registered[id] = ++cs->globals_n;
+        else                 cs->locals_registered [id] = ++cs->locals_n;
+        assert(cs->globals_n < FRAME_VARCOUNT && cs->locals_n < FRAME_VARCOUNT);
         assert(token_is(source, tokens, count, i++, "in"));
-        uint16_t idx = for_loop_index++;
+        uint16_t idx = cs->for_loop_index++;
         assert(idx < FORLOOP_COUNT_LIMIT, "Too many for loops")
         
         size_t ret = compile_expr(source, tokens, count, i, 0);
         assert(ret > 0, "For loop requires valid expression")
         i += ret;
         
-        prog_write5(INST_FORSTART, (func_depth == 0) ? globals_n - 1 : locals_n - 1, idx, 0, 0);
+        prog_write5(INST_FORSTART, (cs->func_depth == 0) ? cs->globals_n - 1 : cs->locals_n - 1, idx, 0, 0);
         
-        uint32_t head = prog_i;
+        uint32_t head = prog.i;
         
         assert(token_is(source, tokens, count, i++, ":"));
         
         i += compile_statementlist(source, tokens, count, i);
         assert(tokens[i++].kind == -11, "Missing end keyword");
         
-        uint32_t cont_to = prog_i;
-        prog_write5(INST_FOREND, (func_depth == 0) ? globals_n - 1 : locals_n - 1, idx, 0, 0);
-        memcpy(program + (prog_i - 2), &head, 4);
+        uint32_t cont_to = prog.i;
+        prog_write5(INST_FOREND, (cs->func_depth == 0) ? cs->globals_n - 1 : cs->locals_n - 1, idx, 0, 0);
+        memcpy(prog.code + (prog.i - 2), &head, 4);
         
-        uint32_t end = prog_i;
-        memcpy(program + (head - 2), &end, 4);
+        uint32_t end = prog.i;
+        memcpy(prog.code + (head - 2), &end, 4);
         
-        uint32_t break_to = prog_i;
-        while (loop_break_i > loop_break_base) memcpy(program + loop_breaks[--loop_break_i], &break_to, 4);
-        while (loop_cont_i  > loop_cont_base ) memcpy(program + loop_conts [--loop_cont_i ], &cont_to , 4);
-        loop_nesting--;
+        uint32_t break_to = prog.i;
+        while (cs->loop_break_i > loop_break_base)
+            memcpy(prog.code + cs->loop_breaks[--cs->loop_break_i], &break_to, 4);
+        while (cs->loop_cont_i  > loop_cont_base )
+            memcpy(prog.code + cs->loop_conts [--cs->loop_cont_i ], &cont_to , 4);
+        cs->loop_nesting--;
         
         return i - orig_i;
     }
@@ -646,9 +646,9 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         i += ret;
         
         uint8_t mode;
-        if (func_depth > 0 && locals_registered[id]) mode = 0;
-        else if (func_depth > 0 && caps_registered[id]) mode = 2;
-        else if (globals_registered[id]) mode = 1;
+        if (cs->func_depth > 0 && cs->locals_registered[id]) mode = 0;
+        else if (cs->func_depth > 0 && cs->caps_registered[id]) mode = 2;
+        else if (cs->globals_registered[id]) mode = 1;
         else panic("Unknown variable");
         
         if (strncmp(opstr, "=", oplen) == 0)       prog_write(INST_SET + mode);
@@ -657,13 +657,13 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         else if (strncmp(opstr, "*=", oplen) == 0) prog_write(INST_SET_MUL + mode);
         else if (strncmp(opstr, "/=", oplen) == 0) prog_write(INST_SET_DIV + mode);
         
-        prog_write(mode == 0 ? (locals_registered[id] - 1) :
-            mode == 1 ? (globals_registered[id] - 1) : (caps_registered[id] - 1));
+        prog_write(mode == 0 ? (cs->locals_registered[id] - 1) :
+            mode == 1 ? (cs->globals_registered[id] - 1) : (cs->caps_registered[id] - 1));
         return i - orig_i;
     }
     else if (i + 2 < count && tokens[i].kind < -lex_ident_offset
              && token_is(source, tokens, count, i+1, "(")
-             && funcs_registered[lex_ident_offset - tokens[i].kind].exists)
+             && cs->funcs_registered[lex_ident_offset - tokens[i].kind].exists)
     {
         uint16_t id = lex_ident_offset - tokens[i++].kind;
         i += 1; // (
@@ -686,12 +686,12 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
     else if (token_is(source, tokens, count, i, "continue")
              || token_is(source, tokens, count, i, "break"))
     {
-        assert(loop_nesting > 0);
+        assert(cs->loop_nesting > 0, "Tried to use break/continue outside of loop");
         prog_write3(INST_JMP, 0, 0);
         if (token_is(source, tokens, count, i, "continue"))
-            loop_conts[loop_cont_i++] = prog_i - 2;
+            cs->loop_conts[cs->loop_cont_i++] = prog.i - 2;
         else
-            loop_breaks[loop_break_i++] = prog_i - 2;
+            cs->loop_breaks[cs->loop_break_i++] = prog.i - 2;
         return 1;
     }
     else if (token_is(source, tokens, count, i, "return"))
@@ -712,16 +712,16 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         }
         i += r;
         
-        if (program[prog_i - 1] == INST_INDEX && (token_is(source, tokens, count, i, "=")
+        if (prog.code[prog.i - 1] == INST_INDEX && (token_is(source, tokens, count, i, "=")
              || token_is(source, tokens, count, i, "+=") || token_is(source, tokens, count, i, "-=")
              || token_is(source, tokens, count, i, "*=") || token_is(source, tokens, count, i, "/=")))
         {
             size_t old_i = i;
-            uint32_t checkpoint = prog_i - 1;
+            uint32_t checkpoint = prog.i - 1;
             size_t r2 = compile_expr(source, tokens, count, i + 1, 0);
             if (!r2) { prog_write(INST_DISCARD); return r; }
             r += r2 + 1;
-            program[checkpoint] = INST_INDEX_LOC;
+            prog.code[checkpoint] = INST_INDEX_LOC;
             if (token_is(source, tokens, count, old_i, "=" )) prog_write(INST_SET_LOC);
             if (token_is(source, tokens, count, old_i, "+=")) prog_write(INST_SET_LOC_ADD);
             if (token_is(source, tokens, count, old_i, "-=")) prog_write(INST_SET_LOC_SUB);
@@ -754,15 +754,15 @@ size_t compile_register_func(const char * source, Token * tokens, size_t count, 
     PARSE_COMMALIST(")", panic("Invalid funcdef"), panic("Invalid funcdef"), assert(j < ARGLIMIT),
         if (tokens[i].kind >= MIN_KEYWORD) panic("Invalid funcdef");
         args[j] = lex_ident_offset - tokens[i++].kind;
-        locals_registered[args[j]] = ++locals_n;
+        cs->locals_registered[args[j]] = ++cs->locals_n;
     )
     if (!token_is(source, tokens, count, i++, ":")) panic("Invalid funcdef");
     
-    funcs_registered[id] = (Funcdef) {1, 0, j, id, prog_i, 0, 0, 0, 0};
+    cs->funcs_registered[id] = (Funcdef) {1, 0, j, id, prog.i, 0, 0, 0, 0};
     if (j > 0)
     {
-        funcs_registered[id].args = (uint16_t *)zalloc(sizeof(uint16_t)*j);
-        memcpy(funcs_registered[id].args, args, j * sizeof(uint16_t));
+        cs->funcs_registered[id].args = (uint16_t *)zalloc(sizeof(uint16_t)*j);
+        memcpy(cs->funcs_registered[id].args, args, j * sizeof(uint16_t));
     }
     
     i += compile_statementlist(source, tokens, count, i);
@@ -779,11 +779,11 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
     int16_t id = lex_ident_offset - tokens[i++].kind;
     
     prog_write3(INST_FUNCDEF, 0, 0);
-    size_t len_offs = prog_i - 2;
+    size_t len_offs = prog.i - 2;
     
     i += compile_register_func(source, tokens, count, id, i);
     
-    memcpy(program + len_offs, &prog_i, 4);
+    memcpy(prog.code + len_offs, &prog.i, 4);
     
     return i - orig_i;
 }
@@ -791,18 +791,18 @@ size_t compile_lambda(const char * source, Token * tokens, size_t count, size_t 
 {
     size_t orig_i = i;
     if (i >= count) return 0;
-    uint32_t id = lambda_id++;
+    uint32_t id = cs->lambda_id++;
     
     prog_write5(INST_LAMBDA, 0, 0, 0, 0);
-    size_t id_offs = prog_i - 4;
-    memcpy(program + id_offs, &id, 4);
+    size_t id_offs = prog.i - 4;
+    memcpy(prog.code + id_offs, &id, 4);
     
     i += compile_register_func(source, tokens, count, id, i);
     
-    funcs_registered[id].caps = caps;
-    funcs_registered[id].cap_count = caps_count;
+    cs->funcs_registered[id].caps = caps;
+    cs->funcs_registered[id].cap_count = caps_count;
     
-    memcpy(program + id_offs + 2, &prog_i, 4);
+    memcpy(prog.code + id_offs + 2, &prog.i, 4);
     
     return i - orig_i;
 }
@@ -813,7 +813,7 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
     {
         if (tokens[i].kind == -4) // func
         {
-            locals_n = 0;
+            cs->locals_n = 0;
             compile_func_start();
             r = compile_func(source, tokens, count, i+1);
             compile_func_end();
@@ -851,7 +851,7 @@ typedef struct _BiValue { struct _Value l; struct _Value r; } BiValue;
 Value val_tagged(uint8_t tag) { Value v; memset(&v, 0, sizeof(Value)); v.tag = tag; return v; }
 Value val_float(double f) { Value v = val_tagged(VALUE_FLOAT); v.u.f = f; return v; }
 Value val_string(char * s) { Value v = val_tagged(VALUE_STRING); v.u.s = s; return v; }
-Value val_func(uint16_t id) { Value v = val_tagged(VALUE_FUNC); v.u.fn = &funcs_registered[id]; return v; }
+Value val_func(uint16_t id) { Value v = val_tagged(VALUE_FUNC); v.u.fn = &cs->funcs_registered[id]; return v; }
 
 Value * array_get(Array * a, size_t i) { assert(i < a->len); return a->buf + i; }
 
@@ -944,8 +944,8 @@ size_t interpret(size_t from_pc)
     frame->pc = from_pc;
     
     #define CASES_START() \
-    while (frame->pc < prog_i) {\
-        uint16_t op = program[frame->pc];\
+    while (frame->pc < prog.i) {\
+        uint16_t op = prog.code[frame->pc];\
         switch (op) {
     #define CASES_END() } }
     
@@ -960,7 +960,7 @@ size_t interpret(size_t from_pc)
     CASES_START()
         
         #define READ_AND_GOTO_TARGET(X)\
-            { uint32_t target; memcpy(&target, program + (frame->pc + X), 4); frame->pc = target; continue; }
+            { uint32_t target; memcpy(&target, prog.code + (frame->pc + X), 4); frame->pc = target; continue; }
         
         MARK_CASE(INST_INVALID)     { PC_INC(); return frame->pc; }
         NEXT_CASE(INST_DISCARD)     --frame->stackpos;
@@ -971,7 +971,7 @@ size_t interpret(size_t from_pc)
             frame->stack[frame->stackpos++] = X;
         
         NEXT_CASE(INST_ARRAY_LITERAL)
-            uint16_t itemcount = program[frame->pc + 1];
+            uint16_t itemcount = prog.code[frame->pc + 1];
             Value v = val_tagged(VALUE_ARRAY);
             v.u.a = (Array *)zalloc(sizeof(Array));
             *v.u.a = (Array) { (Value *)zalloc(sizeof(Value) * itemcount), itemcount, itemcount };
@@ -1000,12 +1000,12 @@ size_t interpret(size_t from_pc)
             frame->stackpos -= argcount; // intrinsics
         
         NEXT_CASE(INST_FUNCCALL)
-            uint16_t argcount = program[frame->pc + 2];
-            Funcdef * fn = &funcs_registered[program[frame->pc + 1]];
+            uint16_t argcount = prog.code[frame->pc + 2];
+            Funcdef * fn = &cs->funcs_registered[prog.code[frame->pc + 1]];
             ENTER_FUNC(0)
         
         NEXT_CASE(INST_FUNCCALL_REF)
-            uint16_t argcount = program[frame->pc + 1];
+            uint16_t argcount = prog.code[frame->pc + 1];
             Value v_func = frame->stack[frame->stackpos - argcount - 1];
             assert(v_func.tag == VALUE_FUNC);
             Funcdef * fn = v_func.u.fn;
@@ -1034,24 +1034,24 @@ size_t interpret(size_t from_pc)
         
         NEXT_CASE(PUSH_NUM)
             double f;
-            memcpy(&f, program + frame->pc + 1, 8);
+            memcpy(&f, prog.code + frame->pc + 1, 8);
             STACK_PUSH(val_float(f))
         
         NEXT_CASE(PUSH_GLOBAL)
-            STACK_PUSH(global_frame->vars[program[frame->pc + 1]])
+            STACK_PUSH(global_frame->vars[prog.code[frame->pc + 1]])
         NEXT_CASE(INST_SET_GLOBAL)
             Value v = frame->stack[--frame->stackpos];
-            global_frame->vars[program[frame->pc + 1]] = v;
+            global_frame->vars[prog.code[frame->pc + 1]] = v;
         
         NEXT_CASE(PUSH_CAP)
-            STACK_PUSH(*frame->caps[program[frame->pc + 1]])
+            STACK_PUSH(*frame->caps[prog.code[frame->pc + 1]])
         NEXT_CASE(INST_SET_CAP)
             Value v = frame->stack[--frame->stackpos];
-            *frame->caps[program[frame->pc + 1]] = v;
+            *frame->caps[prog.code[frame->pc + 1]] = v;
         
         #define GLOBAL_MATH_SHARED(X)\
             Value v2 = frame->stack[--frame->stackpos];\
-            uint16_t id = program[frame->pc + 1];\
+            uint16_t id = prog.code[frame->pc + 1];\
             Value v1 = global_frame->vars[id];\
             assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers 1");\
             global_frame->vars[id] = val_float(X);
@@ -1063,7 +1063,7 @@ size_t interpret(size_t from_pc)
         
         #define CAP_MATH_SHARED(X)\
             Value v2 = frame->stack[--frame->stackpos];\
-            uint16_t id = program[frame->pc + 1];\
+            uint16_t id = prog.code[frame->pc + 1];\
             Value v1 = *frame->caps[id];\
             assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers 2");\
             *frame->caps[id] = val_float(X);
@@ -1071,7 +1071,7 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_SET_CAP_ADD)    CAP_MATH_SHARED(v1.u.f + v2.u.f)
         NEXT_CASE(INST_SET_CAP_SUB)
             Value v2 = frame->stack[--frame->stackpos];
-            uint16_t id = program[frame->pc + 1];
+            uint16_t id = prog.code[frame->pc + 1];
             //printf("%p\n", frame->caps);
             //printf("%d\n", id);
             Value v1 = *frame->caps[id];
@@ -1117,8 +1117,8 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_FORSTART)
             Value v = frame->stack[--frame->stackpos];
             assert(v.tag == VALUE_FLOAT, "For loops can only operate on numbers");
-            uint16_t id = program[frame->pc + 1];
-            uint16_t idx = program[frame->pc + 2];
+            uint16_t id = prog.code[frame->pc + 1];
+            uint16_t idx = prog.code[frame->pc + 2];
             frame->forloops[idx] = v.u.f;
             double temp = v.u.f;
             assert(temp - 1.0 != temp, "For loop value is too large and will never terminate");
@@ -1126,9 +1126,9 @@ size_t interpret(size_t from_pc)
             if (temp < 1.0)
                 READ_AND_GOTO_TARGET(3)
         NEXT_CASE(INST_FOREND)
-            uint16_t id = program[frame->pc + 1];
+            uint16_t id = prog.code[frame->pc + 1];
             assert(frame->vars[id].tag == VALUE_FLOAT, "For loops can only handle numbers");
-            uint16_t idx = program[frame->pc + 2];
+            uint16_t idx = prog.code[frame->pc + 2];
             frame->vars[id].u.f += 1.0;
             if (frame->vars[id].u.f < frame->forloops[idx])
                 READ_AND_GOTO_TARGET(3)
@@ -1141,18 +1141,18 @@ size_t interpret(size_t from_pc)
             if (val_truthy(frame->stack[--frame->stackpos])) READ_AND_GOTO_TARGET(1)
         
         NEXT_CASE(PUSH_STRING)
-            STACK_PUSH(val_string(stringdup(compiled_strings[program[frame->pc + 1]])))
+            STACK_PUSH(val_string(stringdup(cs->compiled_strings[prog.code[frame->pc + 1]])))
         NEXT_CASE(PUSH_LOCAL)
-            STACK_PUSH(frame->vars[program[frame->pc + 1]])
+            STACK_PUSH(frame->vars[prog.code[frame->pc + 1]])
         NEXT_CASE(PUSH_FUNCNAME)
-            STACK_PUSH(val_func(program[frame->pc + 1]))
+            STACK_PUSH(val_func(prog.code[frame->pc + 1]))
         
         NEXT_CASE(INST_SET)
-            frame->vars[program[frame->pc + 1]] = frame->stack[--frame->stackpos];
+            frame->vars[prog.code[frame->pc + 1]] = frame->stack[--frame->stackpos];
         
         #define LOCAL_MATH_SHARED(X)\
             Value v2 = frame->stack[--frame->stackpos];\
-            uint16_t id = program[frame->pc + 1];\
+            uint16_t id = prog.code[frame->pc + 1];\
             Value v1 = frame->vars[id];\
             assert(v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Math only works on numbers 5");\
             frame->vars[id] = val_float(X);
@@ -1203,7 +1203,7 @@ size_t interpret(size_t from_pc)
             if (v1.tag == VALUE_DICT)   frame->assign_target_agg = dict_get_or_insert(v1.u.d, &v2);
         
         NEXT_CASE(INST_LAMBDA)
-            Value v = val_func(program[frame->pc + 1]);
+            Value v = val_func(prog.code[frame->pc + 1]);
             Funcdef * f = (Funcdef *)zalloc(sizeof(Funcdef));
             *f = *v.u.fn;
             //printf("%p\n", f->caps);
@@ -1224,7 +1224,7 @@ size_t interpret(size_t from_pc)
 void register_intrinsic_func(const char * s)
 {
     int16_t id = lex_ident_offset - insert_or_lookup_id(s, strlen(s));
-    funcs_registered[id] = (Funcdef) {1, 1, 0, id, prog_i, 0, 0, 0, 0};
+    cs->funcs_registered[id] = (Funcdef) {1, 1, 0, id, prog.i, 0, 0, 0, 0};
 }
 
 #include "intrinsics.h"

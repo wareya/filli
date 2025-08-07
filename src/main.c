@@ -24,6 +24,7 @@ int main(int argc, char ** argv)
 #endif
     init_program();
     lex_init();
+    compiler_state_init();
     register_intrinsic_funcs();
     
     if (argc < 2) { prints("Usage: filli filename.fil\n"); return 0; }
@@ -53,9 +54,9 @@ int main(int argc, char ** argv)
     Token * tokens = tokenize(source, &count);
     compile(source, tokens, count, 0);
     
-    for (size_t i = 0; i < prog_i; i++)
+    for (size_t i = 0; i < prog.i; i++)
     {
-        printu16hex(program[i]);
+        printu16hex(prog.code[i]);
         prints("\n");
     }
     

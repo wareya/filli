@@ -29,6 +29,7 @@ int main(void)
 #endif
     init_program();
     lex_init();
+    compiler_state_init();
     register_intrinsic_funcs();
     
     char * cursor = input;
