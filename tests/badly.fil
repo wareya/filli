@@ -71,3 +71,20 @@ d[8] # accessing a dict field automatically fills it with null if it doesn't exi
 foreach(d, lambda[](x):
     print(x, d[x])
 end )
+
+
+let a = []
+array_insert(a, 0, 3.142)
+print(a[0])
+array_insert(a, 0, 591935.1)
+print(a[0], a[1])
+array_insert(a, 2, "ahh")
+print(a[0], a[1], a[2])
+
+print()
+
+print(array_remove(a, 0))
+print(a[0], a[1])
+print(array_remove(a, 1))
+print(a[0])
+

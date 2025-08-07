@@ -5,6 +5,9 @@ uint16_t print_id;
 uint16_t typeof_id;
 uint16_t len_id;
 uint16_t keys_id;
+uint16_t array_insert_id;
+uint16_t array_remove_id;
+
 void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
 {
     #define STACK_PUSH2(X) {\
@@ -75,16 +78,69 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
         }
         else panic2(,"Tried to use keys() on a non-dictionary");
     }
+    else if (id == array_insert_id)
+    {
+        assert2(, argcount == 3, "Wrong number of arguments to function");
+        Value v = frame->stack[frame->stackpos - 3];
+        Value v2 = frame->stack[frame->stackpos - 2];
+        Value v3 = frame->stack[frame->stackpos - 1];
+        if (v.tag == VALUE_ARRAY)
+        {
+            assert2(, v2.tag == VALUE_FLOAT, "Array indexes must be numbers");
+            size_t index = v2.u.f;
+            assert2(, index >= 0 && index <= v.u.a->len, "Array index out of range");
+            frame->stackpos -= 1;
+            if (v.u.a->len + 1 >= v.u.a->cap)
+            {
+                v.u.a->cap *= 2;
+                Value * re = (Value *)zalloc(sizeof(Value) * v.u.a->cap);
+                memcpy(re, v.u.a->buf, v.u.a->cap / 2);
+            }
+            for (size_t i = v.u.a->len + 1; i > index; i--)
+                v.u.a->buf[i] = v.u.a->buf[i - 1];
+            v.u.a->buf[index] = v3;
+            v.u.a->len += 1;
+            STACK_PUSH2(v2)
+        }
+        else panic2(,"Tried to use array_insert_id() on a non-dictionary");
+    }
+    else if (id == array_remove_id)
+    {
+        assert2(, argcount == 2, "Wrong number of arguments to function");
+        Value v = frame->stack[frame->stackpos - 2];
+        Value v2 = frame->stack[frame->stackpos - 1];
+        if (v.tag == VALUE_ARRAY)
+        {
+            assert2(, v2.tag == VALUE_FLOAT, "Array indexes must be numbers");
+            size_t index = v2.u.f;
+            assert2(, index >= 0 && index < v.u.a->len, "Array index out of range");
+            frame->stackpos -= 1;
+            if (v.u.a->len + 1 >= v.u.a->cap)
+            {
+                v.u.a->cap *= 2;
+                Value * re = (Value *)zalloc(sizeof(Value) * v.u.a->cap);
+                memcpy(re, v.u.a->buf, v.u.a->cap / 2);
+            }
+            Value v3 = v.u.a->buf[index];
+            for (size_t i = index; i < v.u.a->len - 1; i++)
+                v.u.a->buf[i] = v.u.a->buf[i + 1];
+            v.u.a->len -= 1;
+            STACK_PUSH2(v3)
+        }
+        else panic2(,"Tried to use array_insert_id() on a non-dictionary");
+    }
     else panic2(,"Unknown internal function");
 }
 
 void register_intrinsic_funcs(void)
 {
-#define REGISTER(X) register_intrinsic_func(#X); X ## _id = lex_ident_offset - insert_or_lookup_id(#X, strlen(#X));
+    #define REGISTER(X) register_intrinsic_func(#X); X ## _id = lex_ident_offset - insert_or_lookup_id(#X, strlen(#X));
     REGISTER(print)
     REGISTER(typeof)
     REGISTER(len)
     REGISTER(keys)
+    REGISTER(array_insert)
+    REGISTER(array_remove)
 }
 
 #endif
