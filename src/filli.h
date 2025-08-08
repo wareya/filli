@@ -121,16 +121,15 @@ Token * tokenize(const char * src, size_t * count)
         
         if (src[i] == '\n')
         {
-            if (newline_is_token && t > 0 && token_is(src, ret, t, t-1, "\\")) t -= 1;
-            else if (newline_is_token) ret[t++] = mk_token(i, 1, 3);
-            i++;
+            if (newline_is_token && t > 0 && token_is(src, ret, t, t-1, "\\")) { t -= 1; i++; }
+            else if (newline_is_token) ret[t++] = mk_token(i++, 1, 3);
         }
         // tokenize numbers
         else if ((src[i] >= '0' && src[i] <= '9') || (src[i] == '-' && src[i+1] >= '0' && src[i+1] <= '9'))
         {
-            uint8_t dok = 1; // dot OK or not?
             size_t start_i = i;
             if (src[i] == '-') i += 1;
+            uint8_t dok = 1; // dot OK or not?
             while ((src[i] >= '0' && src[i] <= '9') || (dok && src[i] == '.')) dok &= src[i++] != '.';
             ret[t++] = mk_token(start_i, i-start_i, 0);
         }
@@ -243,8 +242,7 @@ typedef struct _CompilerData {
 
     uint16_t * locals_reg, * caps_reg, * locals_reg_stack[1024], * caps_reg_stack[1024];
     
-    uint32_t loop_nesting, loop_cont_i, loop_break_i;
-    uint32_t loop_conts[1024], loop_breaks[1024];
+    uint32_t loop_nesting, loop_cont_i, loop_break_i, loop_conts[1024], loop_breaks[1024];
 } CompilerState;
 
 CompilerState * cs;
@@ -252,10 +250,8 @@ void compiler_state_init(void)
 {
     cs = (CompilerState *)zalloc(sizeof(CompilerState));
     *cs = FI_LIT(CompilerState) {
-        {}, {}, {},
-        IDENTIFIER_COUNT, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, {}, {},
-        0, 0, 0, {}, {},
+        {}, {}, {}, IDENTIFIER_COUNT, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, {}, {}, 0, 0, 0, {}, {},
     };
 }
 
@@ -450,28 +446,22 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
     size_t r = compile_expr(source, tokens, count, i + 1, binding_power < 50 ? binding_power : 0);
     if (r == 0) return 0;
     
-    uint16_t inst;
-    if (token_is(source, tokens, count, i, "-")) inst = INST_SUB;
-    else if (token_is(source, tokens, count, i, "/")) inst = INST_DIV;
-    else if (token_is(source, tokens, count, i, "+")) inst = INST_ADD;
-    else if (token_is(source, tokens, count, i, "*")) inst = INST_MUL;
-    else if (token_is(source, tokens, count, i, "==")) inst = INST_CMP_EQ;
-    else if (token_is(source, tokens, count, i, "!=")) inst = INST_CMP_NE;
-    else if (token_is(source, tokens, count, i, ">=")) inst = INST_CMP_GE;
-    else if (token_is(source, tokens, count, i, "<=")) inst = INST_CMP_LE;
-    else if (token_is(source, tokens, count, i, ">")) inst = INST_CMP_GT;
-    else if (token_is(source, tokens, count, i, "<")) inst = INST_CMP_LT;
-    else if (token_is(source, tokens, count, i, "and")) inst = INST_CMP_AND;
-    else if (token_is(source, tokens, count, i, "or")) inst = INST_CMP_OR;
-    else if (token_is(source, tokens, count, i, "["))
+    if (token_is(source, tokens, count, i, "["))
     {
-        inst = INST_INDEX;
         i += ++r;
         assert2(0, token_is(source, tokens, count, i++, "]"));
+        prog_write(INST_INDEX); return r + 1;
     }
-    else { printsn(source + tokens[i].i, tokens[i].len); prints("\n"); panic2(0, "Unknown infix operator"); }
-    prog_write(inst);
-    return r + 1;
+    const char * ops[] = {"-", "/", "+", "*", "and", "or", "==", "!=", ">=", "<=", ">", "<"};
+    const uint16_t opcodes[] = {INST_SUB, INST_DIV, INST_ADD, INST_MUL, INST_CMP_AND, INST_CMP_OR,
+        INST_CMP_EQ, INST_CMP_NE, INST_CMP_GE, INST_CMP_LE, INST_CMP_GT, INST_CMP_LT};
+    
+    for (size_t j = 0; i < count && j < sizeof(ops) / sizeof(ops[0]); j++)
+        if (token_is(source, tokens, count, i, ops[j])) { prog_write(opcodes[j]); return r + 1; }
+    
+    printsn(source + tokens[i].i, tokens[i].len);
+    prints("\n");
+    panic2(0, "Unknown infix operator");
 }
 
 
