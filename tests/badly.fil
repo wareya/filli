@@ -110,3 +110,7 @@ s[6] = "_";
 
 print(s)
 print(s2)
+
+func a(sq): sq[2] = "Q" print(sq) end
+a(s)
+print(s)
