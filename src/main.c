@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <stddef.h>
 #include <string.h>
 
 #ifndef NO_GC
@@ -13,6 +14,11 @@
 #define calloc(X, Y) GC_MALLOC(X*Y)
 #define realloc(X, Y) GC_REALLOC(X, Y)
 #define free(X) GC_FREE(X)
+#else
+#define MICROARENA
+#include "microarena.h"
+#define malloc(X) ma_malloc(X)
+#define free(X)
 #endif
 
 #include "filli.h"
@@ -76,6 +82,10 @@ int main(int argc, char ** argv)
         fputs(filli_err, stdout);
         fputs("\n", stdout);
     }
-
+    
+    #ifdef MICROARENA
+    ma_free_checkpoint(0);
+    #endif
+    
     return 0;
 }

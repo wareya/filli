@@ -37,12 +37,6 @@
 //      return a malloc-allocated string containing something similar to sprintf %f
 //      does not need to be accurate
 
-
-// uint64_t double_bits(double f);
-//      return a double bit-punned as a u64
-// uint64_t double_bits_safe(double f);
-//      return a double bit-punned as a u64, but with -0.0 mapped to all-zeroes like +0.0 is
-
 #define STRINGIZE2(x) #x
 #define STRINGIZE(x) STRINGIZE2(x)
 #define LINE_STRING STRINGIZE(__LINE__)
@@ -123,7 +117,5 @@ const char * baddtostr(double f)
     return stringdup(buf);
 }
 
-uint64_t double_bits(double f) { uint64_t n = 0; memcpy(&n, &f, 8); return n; }
-uint64_t double_bits_safe(double f) { if (f == 0.0) return 0; else return double_bits(f); }
 
 #endif
