@@ -903,9 +903,10 @@ void dict_reallocate(Dict * d, size_t newcap)
     d->cap = newcap;
     d->buf = newbuf;
 }
+// Open-addressing hashmap that uses tombstones for deletion.
 BiValue * dict_get_or_insert(Dict * d, Value v)
 {
-    if (d->cap == 0) dict_reallocate(d, 1);
+    if (d->cap == 0) dict_reallocate(d, 8);
     // max 50% load factor
     if ((d->len + 1 + d->tombs) * 2 > d->cap) dict_reallocate(d, d->cap * 2);
     
@@ -1147,7 +1148,6 @@ size_t interpret(size_t from_pc)
         #define EQ_SHARED(X) BIN_STACKPOP()\
             int8_t equality = val_cmp(v1, v2);\
             frame->stack[frame->stackpos++] = val_float(X);
-            // 0: equal, 2: neq (unordered). -1: lt. 1: gt.
         
         NEXT_CASE(INST_CMP_EQ)    EQ_SHARED(equality == 0)
         NEXT_CASE(INST_CMP_NE)    EQ_SHARED(equality != 0)
@@ -1231,6 +1231,8 @@ size_t interpret(size_t from_pc)
             frame->stack[frame->stackpos++] = v1;
         
         NEXT_CASE(INST_INDEX_LOC)    INDEX_SHARED(<)
+            // Our strings are double-boxed so that we can COW them without the compiler needing to be aware of
+            //  whether a string value is going to be used as a "place"/"lvalue" or not.
             if (v1.tag == VALUE_STRING) { assert2(0, (size_t)v2.u.f <= strlen(*v1.u.s), "Index past end of string");
                 *v1.u.s = stringdupn(*v1.u.s, strlen(*v1.u.s) + 1); frame->set_tgt_char = *v1.u.s + (size_t)v2.u.f; }
             if (v1.tag == VALUE_ARRAY)  frame->set_tgt_agg = array_get(v1.u.a, v2.u.f);
