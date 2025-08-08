@@ -13,6 +13,8 @@
 #include <stddef.h>
 #include <string.h>
 
+#define USE_TAIL_DISPATCH 1 // 40% speed boost on clang
+
 #define IDENTIFIER_COUNT 32000 // max number of uniquely-spelled identifiers per program
 #define FRAME_VARCOUNT 1024 // increases memory usage of stack frames
 #define FRAME_STACKSIZE 1024 // increases memory usage of stack frames
@@ -916,18 +918,18 @@ void dict_reallocate(Dict * d, size_t newcap)
     d->cap = newcap;
     d->buf = newbuf;
 }
-BiValue * dict_get_or_insert(Dict * d, Value * v)
+BiValue * dict_get_or_insert(Dict * d, Value v)
 {
     if (d->cap == 0) dict_reallocate(d, 1);
     // max 50% load factor
     if ((d->len + 1 + d->tombs) * 2 > d->cap) dict_reallocate(d, d->cap * 2);
     
-    uint64_t hash = val_hash(v) & (d->cap - 1);
-    while (d->buf[hash].l.tag != VALUE_INVALID && val_cmp(*v, d->buf[hash].l) != 0) hash = (hash + 1) & (d->cap - 1);
+    uint64_t hash = val_hash(&v) & (d->cap - 1);
+    while (d->buf[hash].l.tag != VALUE_INVALID && val_cmp(v, d->buf[hash].l) != 0) hash = (hash + 1) & (d->cap - 1);
     if (d->buf[hash].l.tag == VALUE_INVALID) 
     {
         d->len++;
-        d->buf[hash] = (BiValue) { *v, val_tagged(VALUE_NULL) };
+        d->buf[hash] = (BiValue) { v, val_tagged(VALUE_NULL) };
     }
     return &d->buf[hash];
 }
@@ -956,9 +958,11 @@ void print_op_and_panic(uint16_t op) { prints("---\n"); printu16hex(op); prints(
 
 void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame);
 
-#define INSTX(X) size_t _handler_##X(void);
+#define INSTX(X) size_t _handler_##X(Frame *, Frame *);
 INST_XMACRO()
 #undef INSTX
+
+size_t (*ops[0x100])(Frame * frame, Frame * global_frame) = {};
 
 size_t interpret(size_t from_pc)
 {
@@ -967,37 +971,31 @@ size_t interpret(size_t from_pc)
     
     frame->pc = from_pc;
 
-#if 1
+#if USE_TAIL_DISPATCH
     
-    void ** ops[0x100] = {};
-    for (size_t i = 0; i < 0x100; i++) ops[i] = &&_handle_INST_INVALID;
+    for (size_t i = 0; i < 0x100; i++) ops[i] = _handler_INST_INVALID;
     
-    #define INSTX(X) ops[(X&0xFF)] = &&_handle_##X;
+    #define INSTX(X) ops[(X&0xFF)] = _handler_##X;
     INST_XMACRO()
     
-    #define CASES_START() \
-        uint16_t op = prog.code[frame->pc];\
-        goto *ops[op & 0xFF];
-    #define CASES_END()
+    #define CASES_START() uint16_t op = prog.code[frame->pc]; return ops[op & 0xFF](frame, global_frame); }
+    #define CASES_END() void _dummy(void) {
     
     #define PC_INC() frame->pc += op >> 8; op = prog.code[frame->pc];
     
-    #define MARK_CASE(X) _handle_##X: { repanic(frame->pc);
-    #define END_CASE() PC_INC(); goto *ops[op & 0xFF]; }
+    #define MARK_CASE(X) size_t _handler_##X(Frame * frame, Frame * global_frame) { uint16_t op = X; repanic(frame->pc);
+    #define END_CASE() PC_INC(); [[clang::musttail]] return ops[op & 0xFF](frame, global_frame); }
     #define DECAULT_CASE()
     
-    #define DISPATCH_IMMEDIATELY() op = prog.code[frame->pc]; goto *ops[op & 0xFF];
+    #define DISPATCH_IMMEDIATELY() op = prog.code[frame->pc]; [[clang::musttail]] return ops[op & 0xFF](frame, global_frame);
     
     #define NEXT_CASE(X) END_CASE() MARK_CASE(X)
     
 #else
     
     #define CASES_START() \
-    while (frame->pc < prog.i) {\
-        repanic(frame->pc)\
-        uint16_t op = prog.code[frame->pc];\
-        switch (op) {
-    #define CASES_END() } }
+    while (frame->pc < prog.i) { repanic(frame->pc); uint16_t op = prog.code[frame->pc]; switch (op) {
+    #define CASES_END() } } return frame->pc;
     
     #define PC_INC() frame->pc += op >> 8
     
@@ -1235,14 +1233,14 @@ size_t interpret(size_t from_pc)
             if (v1.tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *));
                 *ss = stringdupn(*v1.u.s + (size_t)v2.u.f, 1); }
             if (v1.tag == VALUE_ARRAY)  v1 = *array_get(v1.u.a, v2.u.f);
-            if (v1.tag == VALUE_DICT)   v1 = dict_get_or_insert(v1.u.d, &v2)->r;
+            if (v1.tag == VALUE_DICT)   v1 = dict_get_or_insert(v1.u.d, v2)->r;
             frame->stack[frame->stackpos++] = v1;
         
         NEXT_CASE(INST_INDEX_LOC)    INDEX_SHARED(<)
             if (v1.tag == VALUE_STRING) { assert2(0, (size_t)v2.u.f <= strlen(*v1.u.s), "Index past end of string");
                 *v1.u.s = stringdupn(*v1.u.s, strlen(*v1.u.s) + 1); frame->set_tgt_char = *v1.u.s + (size_t)v2.u.f; }
             if (v1.tag == VALUE_ARRAY)  frame->set_tgt_agg = array_get(v1.u.a, v2.u.f);
-            if (v1.tag == VALUE_DICT)   frame->set_tgt_agg = &(dict_get_or_insert(v1.u.d, &v2)->r);
+            if (v1.tag == VALUE_DICT)   frame->set_tgt_agg = &(dict_get_or_insert(v1.u.d, v2)->r);
         
         NEXT_CASE(INST_LAMBDA)
             Value v = val_func(prog.code[frame->pc + 1]);
@@ -1258,8 +1256,6 @@ size_t interpret(size_t from_pc)
         END_CASE()
         DECAULT_CASE()
     CASES_END()
-    
-    return frame->pc;
 }
 
 void register_intrinsic_func(const char * s)

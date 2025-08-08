@@ -89,7 +89,7 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
         {
             assert2(, v2.tag == VALUE_FLOAT, "Array indexes must be numbers");
             size_t index = v2.u.f;
-            assert2(, index >= 0 && index <= v.u.a->len, "Array index out of range");
+            assert2(, index <= v.u.a->len, "Array index out of range");
             frame->stackpos -= 3;
             if (v.u.a->len + 1 >= v.u.a->cap)
             {
@@ -117,7 +117,7 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
         {
             assert2(, v2.tag == VALUE_FLOAT, "Array indexes must be numbers");
             size_t index = v2.u.f;
-            assert2(, index >= 0 && index < v.u.a->len, "Array index out of range");
+            assert2(, index < v.u.a->len, "Array index out of range");
             frame->stackpos -= 2;
             if (v.u.a->len + 1 >= v.u.a->cap)
             {
@@ -141,7 +141,7 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
         if (v.tag == VALUE_DICT)
         {
             frame->stackpos -= 2;
-            BiValue * pair = dict_get_or_insert(v.u.d, &v2);
+            BiValue * pair = dict_get_or_insert(v.u.d, v2);
             Value ret = pair->r;
             pair->l = val_tagged(VALUE_TOMBSTONE);
             pair->r = val_tagged(VALUE_INVALID);

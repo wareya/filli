@@ -53,8 +53,10 @@
 char * stringdupn(const char * s, size_t len)
 {
     char * s2 = (char *)malloc(len+1);
-    s2[len] = 0;
-    strncpy(s2, s, len);
+    memset(s2, 0, len+1);
+    //strncpy(s2, s, len); // throws a buggy/wrong warning in GCC
+    size_t i = 0;
+    while (*s && i < len) s2[i++] = *(s++);
     return s2;
 }
 char * stringdup(const char * s) { return stringdupn(s, strlen(s)); }
