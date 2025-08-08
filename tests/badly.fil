@@ -99,3 +99,14 @@ print(a[0], a[1])
 print(array_remove(a, 1))
 print(a[0])
 
+
+let s = "Hello, world!"
+let s2 = s
+
+print(s)
+print(s2)
+
+s[6] = "_";
+
+print(s)
+print(s2)

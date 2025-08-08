@@ -15,8 +15,8 @@
 //      as though die_now(__VA_OPT__( __VA_ARGS__))
 
 // char * stringdupn(const char * s, size_t len);
-//      return a malloc-allocated copy of s, stopping at len
-//      null terminated. stops at any null byte.
+//      return a malloc-allocated copy of s, stopping at len, with len+1 bytes of zero-initialized backing memory.
+//      null terminated. stop copying at any null byte.
 // char * stringdup(const char * s);
 //      return a malloc-allocated copy of s
 //      null terminated

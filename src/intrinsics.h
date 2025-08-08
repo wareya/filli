@@ -22,7 +22,7 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
             long long int offset = i - argcount;
             int tag = frame->stack[frame->stackpos + offset].tag;
             if      (tag == VALUE_FLOAT)    prints(baddtostr(frame->stack[frame->stackpos + offset].u.f));
-            else if (tag == VALUE_STRING)   prints(frame->stack[frame->stackpos + offset].u.s);
+            else if (tag == VALUE_STRING)   prints(*frame->stack[frame->stackpos + offset].u.s);
             else if (tag == VALUE_ARRAY)    prints("<array>");
             else if (tag == VALUE_DICT)     prints("<dict>");
             else if (tag == VALUE_FUNC)     prints("<func>");
@@ -56,7 +56,7 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
         int tag = v.tag;
         frame->stackpos -= 1;
         if      (tag == VALUE_ARRAY)    STACK_PUSH2(val_float(v.u.a->len))
-        else if (tag == VALUE_STRING)   STACK_PUSH2(val_float(strlen(v.u.s)))
+        else if (tag == VALUE_STRING)   STACK_PUSH2(val_float(strlen(*v.u.s)))
         else if (tag == VALUE_DICT)     STACK_PUSH2(val_float(v.u.d->len))
         else panic2(,"Tried to use len() on something with no length");
     }

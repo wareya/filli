@@ -839,14 +839,14 @@ struct _Frame;
 enum { VALUE_NULL, VALUE_INVALID, VALUE_FLOAT, VALUE_ARRAY, VALUE_DICT, VALUE_STRING, VALUE_FUNC, VALUE_STATE, VALUE_TOMBSTONE = 0x7F, };
 
 typedef struct _Value {
-    union { double f; Array * a; Dict * d; char * s; Funcdef * fn; struct _FState * fs; } u;
+    union { double f; Array * a; Dict * d; char ** s; Funcdef * fn; struct _FState * fs; } u;
     uint8_t tag;
 } Value;
 typedef struct _BiValue { struct _Value l; struct _Value r; } BiValue;
 
 Value val_tagged(uint8_t tag) { Value v; memset(&v, 0, sizeof(Value)); v.tag = tag; return v; }
 Value val_float(double f) { Value v = val_tagged(VALUE_FLOAT); v.u.f = f; return v; }
-Value val_string(char * s) { Value v = val_tagged(VALUE_STRING); v.u.s = s; return v; }
+Value val_string(char * s) { Value v = val_tagged(VALUE_STRING); v.u.s = (char **)zalloc(sizeof(char **)); *v.u.s = s; return v; }
 Value val_func(uint16_t id) { Value v = val_tagged(VALUE_FUNC); v.u.fn = &cs->funcs_reg[id]; return v; }
 
 typedef struct _FState { Funcdef * fn; struct _Frame * frame; } FState;
@@ -863,7 +863,7 @@ uint8_t val_eq(Value * a, Value * b)
 {
     if (a->tag != b->tag) return 0;
     if (a->tag == VALUE_FLOAT) return a->u.f == b->u.f || (a->u.f != a->u.f && b->u.f != b->u.f);
-    if (a->tag == VALUE_STRING) return strcmp(a->u.s, b->u.s) == 0;
+    if (a->tag == VALUE_STRING) return a->u.s == b->u.s || strcmp(*a->u.s, *b->u.s) == 0;
     if (a->tag == VALUE_FUNC) return a->u.fn == b->u.fn;
     return 0;
 }
@@ -877,7 +877,7 @@ uint64_t val_hash(Value * v)
     
     hash = (hash + v->tag) * hv;
     if (v->tag == VALUE_FLOAT)  hash = (hash + double_bits_safe(v->u.f)) * hv;
-    else if (v->tag == VALUE_STRING) for (size_t i = 0; v->u.s[i] != 0; i++) hash = (hash + v->u.s[i]) * hv;
+    else if (v->tag == VALUE_STRING) for (size_t i = 0; (*v->u.s)[i] != 0; i++) hash = (hash + (*v->u.s)[i]) * hv;
     else if (v->tag == VALUE_FUNC)   hash = (hash + v->u.fn->id) * hv;
     
     return hash ^ (hash >> 6);
@@ -919,7 +919,7 @@ BiValue * dict_get_or_insert(Dict * d, Value * v)
 uint8_t val_truthy(Value v)
 {
     if (v.tag == VALUE_FLOAT)   return v.u.f != 0.0;
-    if (v.tag == VALUE_STRING)  return v.u.s[0] != 0;
+    if (v.tag == VALUE_STRING)  return (*v.u.s)[0] != 0;
     if (v.tag == VALUE_ARRAY)   return v.u.a->len > 0;
     if (v.tag == VALUE_FUNC)    return 1;
     return 0;
@@ -928,8 +928,8 @@ uint8_t val_truthy(Value v)
 typedef struct _Frame {
     size_t pc, stackpos;
     struct _Frame * return_to;
-    Value * assign_target_agg;
-    char * assign_target_char;
+    Value * set_tgt_agg;
+    char * set_tgt_char;
     Value vars[FRAME_VARCOUNT], stack[FRAME_STACKSIZE];
     double forloops[FORLOOP_COUNT_LIMIT];
     Value ** caps;
@@ -1029,14 +1029,12 @@ size_t interpret(size_t from_pc)
             Value v = frame->stack[--frame->stackpos];
             if (!frame->return_to) { PC_INC(); return frame->pc; }
             frame = frame->return_to;
-            STACK_PUSH(v)
-            continue;
+            STACK_PUSH(v) continue;
         
         NEXT_CASE(INST_RETURN_VOID)
             if (!frame->return_to) { PC_INC(); return frame->pc; }
             frame = frame->return_to;
-            STACK_PUSH(val_tagged(VALUE_NULL))
-            continue;
+            STACK_PUSH(val_tagged(VALUE_NULL)) continue;
         
         NEXT_CASE(PUSH_NULL)    STACK_PUSH(val_tagged(VALUE_NULL))
         
@@ -1046,19 +1044,22 @@ size_t interpret(size_t from_pc)
             STACK_PUSH(v)
         
         NEXT_CASE(PUSH_NUM)
-            double f;
-            memcpy(&f, prog.code + frame->pc + 1, 8);
+            double f; memcpy(&f, prog.code + frame->pc + 1, 8);
             STACK_PUSH(val_float(f))
         
         NEXT_CASE(PUSH_GLOBAL)    STACK_PUSH(global_frame->vars[prog.code[frame->pc + 1]])
         NEXT_CASE(INST_SET_GLOBAL)
-            Value v = frame->stack[--frame->stackpos];
-            global_frame->vars[prog.code[frame->pc + 1]] = v;
+            Value v2 = frame->stack[--frame->stackpos];
+            global_frame->vars[prog.code[frame->pc + 1]] = v2;
+            Value * v = &frame->vars[prog.code[frame->pc + 1]];
+            if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char **)); *ss = *v->u.s; v->u.s = ss; }
         
         NEXT_CASE(PUSH_CAP)    STACK_PUSH(*frame->caps[prog.code[frame->pc + 1]])
         NEXT_CASE(INST_SET_CAP)
-            Value v = frame->stack[--frame->stackpos];
-            *frame->caps[prog.code[frame->pc + 1]] = v;
+            Value v2 = frame->stack[--frame->stackpos];
+            *frame->caps[prog.code[frame->pc + 1]] = v2;
+            Value * v = &frame->vars[prog.code[frame->pc + 1]];
+            if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char **)); *ss = *v->u.s; v->u.s = ss; }
         
         #define GLOBAL_MATH_SHARED(X)\
             Value v2 = frame->stack[--frame->stackpos];\
@@ -1113,7 +1114,7 @@ size_t interpret(size_t from_pc)
             else if (v1.tag == VALUE_FLOAT && (v1.u.f != v1.u.f || v2.u.f != v2.u.f)) equality = 2;\
             else if (v1.tag == VALUE_FLOAT && v1.u.f < v2.u.f) equality = -1;\
             else if (v1.tag == VALUE_FLOAT && v1.u.f > v2.u.f) equality = 1;\
-            else if (v1.tag == VALUE_STRING) equality = strcmp(v1.u.s, v2.u.s);\
+            else if (v1.tag == VALUE_STRING) equality = strcmp(*v1.u.s, *v2.u.s);\
             else if (v1.tag == VALUE_ARRAY && v1.u.a != v2.u.a) equality = 2;\
             frame->stack[frame->stackpos++] = val_float(X);
             // 0: equal, 2: neq (unordered). -1: lt. 1: gt.
@@ -1134,15 +1135,13 @@ size_t interpret(size_t from_pc)
             double temp = v.u.f;
             assert2(0, temp - 1.0 != temp, "For loop value is too large and will never terminate");
             frame->vars[id] = val_float(0.0);
-            if (temp < 1.0)
-                READ_AND_GOTO_TARGET(3)
+            if (temp < 1.0) READ_AND_GOTO_TARGET(3)
         NEXT_CASE(INST_FOREND)
             uint16_t id = prog.code[frame->pc + 1];
             assert2(0, frame->vars[id].tag == VALUE_FLOAT, "For loops can only handle numbers");
             uint16_t idx = prog.code[frame->pc + 2];
             frame->vars[id].u.f += 1.0;
-            if (frame->vars[id].u.f < frame->forloops[idx])
-                READ_AND_GOTO_TARGET(3)
+            if (frame->vars[id].u.f < frame->forloops[idx]) READ_AND_GOTO_TARGET(3)
         
         NEXT_CASE(INST_JMP)    READ_AND_GOTO_TARGET(1)
         NEXT_CASE(INST_JMP_IF_FALSE)    if (!val_truthy(frame->stack[--frame->stackpos])) READ_AND_GOTO_TARGET(1)
@@ -1154,6 +1153,8 @@ size_t interpret(size_t from_pc)
         
         NEXT_CASE(INST_SET)
             frame->vars[prog.code[frame->pc + 1]] = frame->stack[--frame->stackpos];
+            Value * v = &frame->vars[prog.code[frame->pc + 1]];
+            if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char **)); *ss = *v->u.s; v->u.s = ss; }
         
         #define LOCAL_MATH_SHARED(X)\
             Value v2 = frame->stack[--frame->stackpos];\
@@ -1169,17 +1170,15 @@ size_t interpret(size_t from_pc)
             
         NEXT_CASE(INST_SET_LOC)
             Value v2 = frame->stack[--frame->stackpos];
-            if (frame->assign_target_agg)   *frame->assign_target_agg = v2;
-            else assert2(0, frame->assign_target_char && v2.tag == VALUE_STRING && *v2.u.s != '\0');
-            if (frame->assign_target_char)  *frame->assign_target_char = *v2.u.s;
-            frame->assign_target_agg = 0;
-            frame->assign_target_char = 0;
+            if (frame->set_tgt_agg) { *frame->set_tgt_agg = v2; frame->set_tgt_agg = 0; }
+            else { assert2(0, frame->set_tgt_char && v2.tag == VALUE_STRING, "Invalid assignment.");
+                *frame->set_tgt_char = **v2.u.s; frame->set_tgt_char = 0; }
         
         #define ADDR_MATH_SHARED(X)\
             Value v2 = frame->stack[--frame->stackpos];\
-            Value * v1p = frame->assign_target_agg;\
+            Value * v1p = frame->set_tgt_agg;\
             assert2(0, v1p && v2.tag == VALUE_FLOAT && v1p->tag == VALUE_FLOAT, "Math only works on numbers 6");\
-            frame->assign_target_agg = 0;\
+            frame->set_tgt_agg = 0;\
             *v1p = val_float(X);
         
         NEXT_CASE(INST_SET_LOC_ADD)    ADDR_MATH_SHARED(v1p->u.f + v2.u.f)
@@ -1194,18 +1193,20 @@ size_t interpret(size_t from_pc)
             if (v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY) assert2(0, v2.tag == VALUE_FLOAT);\
             if (v1.tag == VALUE_DICT) assert2(0, v2.tag == VALUE_FLOAT || v2.tag == VALUE_STRING\
                                              || v2.tag == VALUE_FUNC || v2.tag == VALUE_NULL);\
-            if (v1.tag == VALUE_STRING) assert2(0, ((size_t)v2.u.f) STR_VALID_OP strlen(v1.u.s));
+            if (v1.tag == VALUE_STRING) assert2(0, ((size_t)v2.u.f) STR_VALID_OP strlen(*v1.u.s));
     
         NEXT_CASE(INST_INDEX)    INDEX_SHARED(<=)
-            if (v1.tag == VALUE_STRING) v1.u.s = stringdupn(v1.u.s + (size_t)v2.u.f, 1);
+            if (v1.tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char **));
+                *ss = stringdupn(*v1.u.s + (size_t)v2.u.f, 1); }
             if (v1.tag == VALUE_ARRAY)  v1 = *array_get(v1.u.a, v2.u.f);
             if (v1.tag == VALUE_DICT)   v1 = dict_get_or_insert(v1.u.d, &v2)->r;
             frame->stack[frame->stackpos++] = v1;
         
         NEXT_CASE(INST_INDEX_LOC)    INDEX_SHARED(<)
-            if (v1.tag == VALUE_STRING) frame->assign_target_char = v1.u.s + (size_t)v2.u.f;
-            if (v1.tag == VALUE_ARRAY)  frame->assign_target_agg = array_get(v1.u.a, v2.u.f);
-            if (v1.tag == VALUE_DICT)   frame->assign_target_agg = &(dict_get_or_insert(v1.u.d, &v2)->r);
+            if (v1.tag == VALUE_STRING) { assert2(0, (size_t)v2.u.f <= strlen(*v1.u.s), "Index past end of string");
+                *v1.u.s = stringdupn(*v1.u.s, strlen(*v1.u.s) + 1); frame->set_tgt_char = *v1.u.s + (size_t)v2.u.f; }
+            if (v1.tag == VALUE_ARRAY)  frame->set_tgt_agg = array_get(v1.u.a, v2.u.f);
+            if (v1.tag == VALUE_DICT)   frame->set_tgt_agg = &(dict_get_or_insert(v1.u.d, &v2)->r);
         
         NEXT_CASE(INST_LAMBDA)
             Value v = val_func(prog.code[frame->pc + 1]);
@@ -1216,8 +1217,7 @@ size_t interpret(size_t from_pc)
             for (size_t j = 0; j < f->cap_count; j++)
                 f->cap_data[j] = (f->caps[j] < 0) ? frame->caps[-f->caps[j]] : &frame->vars[f->caps[j]];
             v.u.fn = f;
-            STACK_PUSH(v)
-            READ_AND_GOTO_TARGET(3)
+            STACK_PUSH(v) READ_AND_GOTO_TARGET(3)
         
         END_CASE()
         DECAULT_CASE()
