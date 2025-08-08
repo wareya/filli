@@ -30,7 +30,7 @@ Filli is meant to be used with BDWGC (aka Boehm GC) or some similar interior-poi
 - - No `goto`
 - No type coersion of any kind
 - - (equality checks accept unalike arguments and return as unordered-unequal)
-- Limited "stdlib", print() only; not automatically exposed to your C environment
+- Limited "stdlib", not automatically exposed to your C environment (similar to Lua)
 - Root-level code runs normally, ergonomic for scripting
 
 ## Examples
@@ -169,7 +169,7 @@ Include `filli.h` in your project, as well as `intrinsics.h` and `microlib.h`. A
 **Filli *intentionally* leaks memory!**
 
 
-You should include libgc / BDWGC before including `filli.h`, like so:
+You should include libgc / BDWGC before including `filli.h`, like so, and link against `libgc` / compile with `-lgc`:
 
 ```c
 #include <gc.h>
