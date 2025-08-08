@@ -989,7 +989,9 @@ size_t interpret(size_t from_pc)
                 next->return_to = frame;\
                 frame = next;\
                 assert2(0, argcount == fn->argcount, "Function arg count doesn't match");\
-                if (!(FORCED)) for (size_t i = fn->argcount; i > 0;) frame->vars[--i] = prev->stack[--prev->stackpos];\
+                if (!(FORCED)) for (size_t i = fn->argcount; i > 0;) {\
+                    frame->vars[--i] = prev->stack[--prev->stackpos]; Value * v = &frame->vars[i + 1];\
+                    if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char **)); *ss = *v->u.s; v->u.s = ss; } }\
                 if (!(FORCED)) if (fn->cap_data) frame->caps = fn->cap_data; \
                 if (!(FORCED)) frame->pc = fn->loc;\
                 if (ISREF) prev->stackpos -= 1;\
