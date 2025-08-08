@@ -13,6 +13,12 @@
 #include <stddef.h>
 #include <string.h>
 
+#ifdef __cplusplus
+#define FI_LIT(X)
+#else
+#define FI_LIT(X) (X)
+#endif
+
 // 40% speed boost on clang, but increases binary size by ~7KB (from ~34KB to ~41KB). worth it, IMO.
 #define USE_TAIL_DISPATCH 1
 
@@ -49,7 +55,7 @@ int16_t insert_or_lookup_id(const char * text, uint16_t len)
     static IdEntry ids[IDENTIFIER_COUNT] = {};
     for (int16_t j = 1; j <= IDENTIFIER_COUNT; j++)
     {
-        if (ids[j].len == 0) ids[j] = (IdEntry) { stringdupn(text, len), len };
+        if (ids[j].len == 0) ids[j] = FI_LIT(IdEntry) { stringdupn(text, len), len };
         if (ids[j].len == len && strncmp(ids[j].where, text, len) == 0) return -j;
     }
     panic2(0, "Out of IDs");
@@ -245,7 +251,7 @@ CompilerState * cs;
 void compiler_state_init(void)
 {
     cs = (CompilerState *)zalloc(sizeof(CompilerState));
-    *cs = (CompilerState) {
+    *cs = FI_LIT(CompilerState) {
         {}, {}, {},
         IDENTIFIER_COUNT, 0, 0, 0, 0, 0, 0, 0,
         0, 0, {}, {},
@@ -750,7 +756,7 @@ size_t compile_register_func(const char * source, Token * tokens, size_t count, 
     )
     if (!token_is(source, tokens, count, i++, ":")) panic2(0, "Invalid funcdef");
     
-    cs->funcs_reg[id] = (Funcdef) {1, 0, (uint16_t)j, id, prog.i, 0, 0, 0, 0};
+    cs->funcs_reg[id] = FI_LIT(Funcdef) {1, 0, (uint16_t)j, id, prog.i, 0, 0, 0, 0};
     if (j > 0)
     {
         cs->funcs_reg[id].args = (uint16_t *)zalloc(sizeof(uint16_t)*j);
@@ -854,7 +860,7 @@ FState * new_fstate(Funcdef * fn) { FState * r = (FState *)zalloc(sizeof(FState)
 Value val_funcstate(Funcdef * fn, struct _Frame * frame) { Value v = val_tagged(VALUE_STATE); v.u.fs = new_fstate(fn); v.u.fs->frame = frame; return v; }
 
 Value val_array(size_t n) { Value v = val_tagged(VALUE_ARRAY); v.u.a = (Array *)zalloc(sizeof(Array));
-    *v.u.a = (Array) { (Value *)zalloc(sizeof(Value) * n), n, n }; return v; }
+    *v.u.a = FI_LIT(Array) { (Value *)zalloc(sizeof(Value) * n), n, n }; return v; }
 
 Value * array_get(Array * a, size_t i) { assert2(0, i < a->len); return a->buf + i; }
 
@@ -895,13 +901,13 @@ void dict_reallocate(Dict * d, size_t newcap)
 {
     BiValue * newbuf = (BiValue *)zalloc(sizeof(BiValue) * newcap);
     for (size_t i = 0; i < newcap; i++)
-        newbuf[i] = (BiValue) { val_tagged(VALUE_INVALID), val_tagged(VALUE_INVALID) };
+        newbuf[i] = FI_LIT(BiValue) { val_tagged(VALUE_INVALID), val_tagged(VALUE_INVALID) };
     for (size_t i = 0; i < d->cap; i++)
     {
         if (d->buf[i].l.tag == VALUE_TOMBSTONE || d->buf[i].l.tag == VALUE_INVALID) continue;
         uint64_t hash = val_hash(&d->buf[i].l) & (newcap - 1);
         while (newbuf[hash].l.tag != VALUE_INVALID && val_cmp(d->buf[i].l, newbuf[hash].l) != 0) hash = (hash + 1) & (d->cap - 1);
-        newbuf[hash] = (BiValue) { d->buf[i].l, d->buf[i].r };
+        newbuf[hash] = FI_LIT(BiValue) { d->buf[i].l, d->buf[i].r };
     }
     d->tombs = 0;
     d->cap = newcap;
@@ -918,7 +924,7 @@ BiValue * dict_get_or_insert(Dict * d, Value v)
     if (d->buf[hash].l.tag == VALUE_INVALID) 
     {
         d->len++;
-        d->buf[hash] = (BiValue) { v, val_tagged(VALUE_NULL) };
+        d->buf[hash] = FI_LIT(BiValue) { v, val_tagged(VALUE_NULL) };
     }
     return &d->buf[hash];
 }
@@ -953,6 +959,9 @@ INST_XMACRO()
 
 size_t (*ops[0x100])(Frame * frame, Frame * global_frame) = {};
 
+uint32_t fi_mem_read_u32(void * from) { uint32_t n; memcpy(&n, from, 4); return n; }
+double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
+
 size_t interpret(size_t from_pc)
 {
     Frame * frame = (Frame *)zalloc(sizeof(Frame));
@@ -973,10 +982,10 @@ size_t interpret(size_t from_pc)
     #define PC_INC() frame->pc += op >> 8; op = prog.code[frame->pc];
     
     #define MARK_CASE(X) size_t _handler_##X(Frame * frame, Frame * global_frame) { uint16_t op = X; repanic(frame->pc);
-    #define END_CASE() PC_INC(); [[clang::musttail]] return ops[op & 0xFF](frame, global_frame); }
+    #define END_CASE() PC_INC(); __attribute__((musttail)) return ops[op & 0xFF](frame, global_frame); }
     #define DECAULT_CASE()
     
-    #define DISPATCH_IMMEDIATELY() op = prog.code[frame->pc]; [[clang::musttail]] return ops[op & 0xFF](frame, global_frame);
+    #define DISPATCH_IMMEDIATELY() op = prog.code[frame->pc]; __attribute__((musttail)) return ops[op & 0xFF](frame, global_frame);
 #else
     
     #define CASES_START() \
@@ -995,7 +1004,7 @@ size_t interpret(size_t from_pc)
 
     CASES_START()
         #define READ_AND_GOTO_TARGET(X)\
-            { uint32_t target; memcpy(&target, prog.code + (frame->pc + X), 4); frame->pc = target; DISPATCH_IMMEDIATELY(); }
+            { uint32_t target = fi_mem_read_u32(prog.code + (frame->pc + X)); frame->pc = target; DISPATCH_IMMEDIATELY(); }
         
         MARK_CASE(INST_INVALID)     { PC_INC(); return frame->pc; }
         NEXT_CASE(INST_DISCARD)     --frame->stackpos;
@@ -1003,7 +1012,8 @@ size_t interpret(size_t from_pc)
         
         #define STACK_PUSH(X)\
             assert2(0, frame->stackpos < FRAME_STACKSIZE);\
-            frame->stack[frame->stackpos++] = X;
+            Value ___cx = (X);\
+            frame->stack[frame->stackpos++] = ___cx;
         
         NEXT_CASE(INST_ARRAY_LITERAL)
             uint16_t itemcount = prog.code[frame->pc + 1];
@@ -1075,8 +1085,7 @@ size_t interpret(size_t from_pc)
             STACK_PUSH(v)
         
         NEXT_CASE(PUSH_NUM)
-            double f; memcpy(&f, prog.code + frame->pc + 1, 8);
-            STACK_PUSH(val_float(f))
+            STACK_PUSH(val_float(fi_mem_read_f64(prog.code + frame->pc + 1)))
         
         NEXT_CASE(PUSH_GLOBAL)    STACK_PUSH(global_frame->vars[prog.code[frame->pc + 1]])
         NEXT_CASE(INST_SET_GLOBAL)
@@ -1245,7 +1254,7 @@ size_t interpret(size_t from_pc)
 void register_intrinsic_func(const char * s)
 {
     int16_t id = lex_ident_offset - insert_or_lookup_id(s, strlen(s));
-    cs->funcs_reg[id] = (Funcdef) {1, 1, 0, (uint16_t)id, prog.i, 0, 0, 0, 0};
+    cs->funcs_reg[id] = FI_LIT(Funcdef) {1, 1, 0, (uint16_t)id, prog.i, 0, 0, 0, 0};
 }
 
 #include "intrinsics.h"
