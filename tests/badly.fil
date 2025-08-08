@@ -111,6 +111,21 @@ s[6] = "_";
 print(s)
 print(s2)
 
-func a(sq): sq[2] = "Q" print(sq) end
-a(s)
+func fa(sq): sq[2] = "Q" print(sq) end
+fa(s)
 print(s)
+
+
+print(not(1.0))
+print(not(0.0))
+print(not(-0.0))
+print(not(-1.0))
+print(truthy(""))
+print(truthy("a"))
+print(truthy([]))
+print(truthy(["a"]))
+print(truthy({}))
+print(truthy(d))
+d["a"] = true
+print(truthy(d))
+print(truthy(fa))

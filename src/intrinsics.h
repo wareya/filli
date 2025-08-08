@@ -8,6 +8,8 @@ uint16_t keys_id;
 uint16_t array_insert_id;
 uint16_t array_remove_id;
 uint16_t dict_remove_id;
+uint16_t truthy_id;
+uint16_t not_id;
 
 void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
 {
@@ -59,6 +61,18 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
         else if (tag == VALUE_STRING)   STACK_PUSH2(val_float(strlen(*v.u.s)))
         else if (tag == VALUE_DICT)     STACK_PUSH2(val_float(v.u.d->len))
         else panic2(,"Tried to use len() on something with no length");
+    }
+    else if (id == truthy_id)
+    {
+        assert2(, argcount == 1, "Wrong number of arguments to function");
+        Value v = frame->stack[--frame->stackpos];
+        STACK_PUSH2(val_float(val_truthy(v)))
+    }
+    else if (id == not_id)
+    {
+        assert2(, argcount == 1, "Wrong number of arguments to function");
+        Value v = frame->stack[--frame->stackpos];
+        STACK_PUSH2(val_float(!val_truthy(v)))
     }
     else if (id == keys_id)
     {
@@ -165,6 +179,8 @@ void register_intrinsic_funcs(void)
     REGISTER(array_insert)
     REGISTER(array_remove)
     REGISTER(dict_remove)
+    REGISTER(truthy)
+    REGISTER(not)
 }
 
 #endif

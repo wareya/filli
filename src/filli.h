@@ -925,6 +925,7 @@ uint8_t val_truthy(Value v)
     if (v.tag == VALUE_FLOAT)   return v.u.f != 0.0;
     if (v.tag == VALUE_STRING)  return (*v.u.s)[0] != 0;
     if (v.tag == VALUE_ARRAY)   return v.u.a->len > 0;
+    if (v.tag == VALUE_DICT)    return v.u.d->len > 0;
     if (v.tag == VALUE_FUNC)    return 1;
     return 0;
 }
