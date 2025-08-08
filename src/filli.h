@@ -192,6 +192,8 @@ enum { INST_INVALID = 0x000,
     // INST_LAMBDA: func id (4), destination(4)
 };
 
+#define INST_XMACRO() INSTX(INST_INVALID) INSTX(INST_DISCARD) INSTX(PUSH_NULL) INSTX(PUSH_DICT_EMPTY) INSTX(INST_RETURN_VAL) INSTX(INST_RETURN_VOID) INSTX(INST_YIELD) INSTX(INST_ADD) INSTX(INST_SUB) INSTX(INST_MUL) INSTX(INST_DIV) INSTX(INST_CMP_AND) INSTX(INST_CMP_OR) INSTX(INST_SET_LOC) INSTX(INST_SET_LOC_ADD) INSTX(INST_SET_LOC_SUB) INSTX(INST_SET_LOC_MUL) INSTX(INST_SET_LOC_DIV) INSTX(INST_INDEX) INSTX(INST_INDEX_LOC) INSTX(INST_CMP_EQ) INSTX(INST_CMP_NE) INSTX(INST_CMP_GT) INSTX(INST_CMP_LT) INSTX(INST_CMP_GE) INSTX(INST_CMP_LE) INSTX(PUSH_FUNCNAME) INSTX(INST_FUNCCALL_REF) INSTX(PUSH_STRING) INSTX(INST_ARRAY_LITERAL) INSTX(PUSH_LOCAL) INSTX(PUSH_GLOBAL) INSTX(PUSH_CAP) INSTX(INST_SET) INSTX(INST_SET_GLOBAL) INSTX(INST_SET_CAP) INSTX(INST_SET_ADD) INSTX(INST_SET_GLOBAL_ADD) INSTX(INST_SET_CAP_ADD) INSTX(INST_SET_SUB) INSTX(INST_SET_GLOBAL_SUB) INSTX(INST_SET_CAP_SUB) INSTX(INST_SET_MUL) INSTX(INST_SET_GLOBAL_MUL) INSTX(INST_SET_CAP_MUL) INSTX(INST_SET_DIV) INSTX(INST_SET_GLOBAL_DIV) INSTX(INST_SET_CAP_DIV) INSTX(INST_JMP) INSTX(INST_JMP_IF_FALSE) INSTX(INST_JMP_IF_TRUE) INSTX(INST_FUNCDEF) INSTX(INST_FUNCCALL) INSTX(PUSH_NUM) INSTX(INST_FOREND) INSTX(INST_FORSTART) INSTX(INST_LAMBDA)
+
 typedef struct _Program { uint16_t * code; uint32_t capacity; uint32_t i; } Program;
 Program prog = {0, PROGRAM_MAXLEN, 0};
 void init_program() { prog.code = (uint16_t *)zalloc(sizeof(uint16_t) * prog.capacity); }
@@ -832,6 +834,7 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
             break;
         }
     }
+    prog_write(INST_RETURN_VOID);
     return i - orig_i;
 }
 
@@ -959,6 +962,33 @@ size_t interpret(size_t from_pc)
     Frame * global_frame = frame;
     
     frame->pc = from_pc;
+
+#if 1
+    
+    void * ops[0x100] = {};
+    for (size_t i = 0; i < 0x100; i++) ops[i] = &&_handle_INST_INVALID;
+    
+    #define INSTX(X) ops[(X&0xFF)] = &&_handle_##X;
+    INST_XMACRO()
+    
+    #define CASES_START() \
+    while (frame->pc < prog.i) {\
+        repanic(frame->pc)\
+        uint16_t op = prog.code[frame->pc];\
+        goto *ops[op & 0xFF];
+    #define CASES_END() }
+    
+    #define PC_INC() frame->pc += op >> 8; op = prog.code[frame->pc];
+    
+    #define MARK_CASE(X) _handle_##X: {
+    #define END_CASE() PC_INC(); goto *ops[op & 0xFF]; }
+    #define DECAULT_CASE()
+    
+    #define DISPATCH_IMMEDIATELY() op = prog.code[frame->pc]; goto *ops[op & 0xFF];
+    
+    #define NEXT_CASE(X) END_CASE() MARK_CASE(X)
+    
+#else
     
     #define CASES_START() \
     while (frame->pc < prog.i) {\
@@ -973,8 +1003,12 @@ size_t interpret(size_t from_pc)
     #define END_CASE() PC_INC(); continue; }
     #define DECAULT_CASE() default: print_op_and_panic(op);
     
+    #define DISPATCH_IMMEDIATELY() continue
+    
     #define NEXT_CASE(X) END_CASE() MARK_CASE(X)
     
+#endif 
+
     CASES_START()
         #define READ_AND_GOTO_TARGET(X)\
             { uint32_t target; memcpy(&target, prog.code + (frame->pc + X), 4); frame->pc = target; continue; }
@@ -1007,7 +1041,7 @@ size_t interpret(size_t from_pc)
                     if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; } }\
                 if (!(FORCED)) { frame->pc = fn->loc; if (fn->cap_data) frame->caps = fn->cap_data; }\
                 if (ISREF) prev->stackpos -= 1;\
-                continue; }\
+                DISPATCH_IMMEDIATELY(); }\
             handle_intrinsic_func(fn->id, argcount, frame); // intrinsics
         
         NEXT_CASE(INST_FUNCCALL)
@@ -1036,19 +1070,18 @@ size_t interpret(size_t from_pc)
             if (!frame->return_to) return frame->pc;
             frame = frame->return_to;
             
-            STACK_PUSH(v2)
-            continue;
+            STACK_PUSH(v2) DISPATCH_IMMEDIATELY();
         
         NEXT_CASE(INST_RETURN_VAL)
             Value v = frame->stack[--frame->stackpos];
             if (!frame->return_to) { PC_INC(); return frame->pc; }
             frame = frame->return_to;
-            STACK_PUSH(v) continue;
+            STACK_PUSH(v) DISPATCH_IMMEDIATELY();
         
         NEXT_CASE(INST_RETURN_VOID)
             if (!frame->return_to) { PC_INC(); return frame->pc; }
             frame = frame->return_to;
-            STACK_PUSH(val_tagged(VALUE_NULL)) continue;
+            STACK_PUSH(val_tagged(VALUE_NULL)) DISPATCH_IMMEDIATELY();
         
         NEXT_CASE(PUSH_NULL)    STACK_PUSH(val_tagged(VALUE_NULL))
         
