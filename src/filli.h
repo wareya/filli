@@ -961,22 +961,33 @@ size_t interpret(size_t from_pc)
 
 #if USE_TAIL_DISPATCH
     
+    // Tail-call "threaded" dispatch is an interpreter design technique where opcode handlers are functions that
+    //  jump directly to the next opcode instead of returning to a handler. This suppresses code-sharing optimizations
+    //  that can cause the compiler to generate code that thrashes the branch predictor, and also forces each dispatch
+    //  to depend on which opcode it's coming from. This allows the CPU's branch predictor to learn that, for example,
+    //  a particular opcode is almost always followed by a particular other opcode, and to always predict that other
+    //  opcode when proceeding from the first one.
+    
+    // To avoid code duplication, we use macros to swap out the dispatch system, instead of hardcoding both systems.
+    
     for (size_t i = 0; i < 0x100; i++) ops[i] = _handler_INST_INVALID;
     
     #define INSTX(X) ops[(X&0xFF)] = _handler_##X;
     INST_XMACRO()
     
-    #define CASES_START() uint16_t op = prog.code[frame->pc]; return ops[op & 0xFF](frame, global_frame); }
-    #define CASES_END() void _dummy(void) {
+    #define CASES_START() uint16_t op = prog.code[frame->pc]; return ops[op & 0xFF](frame, global_frame);
+    #define CASES_END()
     
     #define PC_INC() frame->pc += op >> 8; op = prog.code[frame->pc];
     
-    #define MARK_CASE(X) size_t _handler_##X(Frame * frame, Frame * global_frame) { uint16_t op = X; repanic(frame->pc);
-    #define END_CASE() PC_INC(); __attribute__((musttail)) return ops[op & 0xFF](frame, global_frame); }
+    #define MARK_CASE(X) } size_t _handler_##X(Frame * frame, Frame * global_frame) { uint16_t op = X; repanic(frame->pc);
+    #define END_CASE() PC_INC(); __attribute__((musttail)) return ops[op & 0xFF](frame, global_frame);
     #define DECAULT_CASE()
     
     #define DISPATCH_IMMEDIATELY() op = prog.code[frame->pc]; __attribute__((musttail)) return ops[op & 0xFF](frame, global_frame);
 #else
+    
+    // This, on the other hand, is a conventional loop-over-switch-statement interpreter dispatch system.
     
     #define CASES_START() \
     while (frame->pc < prog.i) { repanic(frame->pc); uint16_t op = prog.code[frame->pc]; switch (op) {
