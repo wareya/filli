@@ -956,6 +956,10 @@ void print_op_and_panic(uint16_t op) { prints("---\n"); printu16hex(op); prints(
 
 void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame);
 
+#define INSTX(X) size_t _handler_##X(void);
+INST_XMACRO()
+#undef INSTX
+
 size_t interpret(size_t from_pc)
 {
     Frame * frame = (Frame *)zalloc(sizeof(Frame));
@@ -965,22 +969,20 @@ size_t interpret(size_t from_pc)
 
 #if 1
     
-    void * ops[0x100] = {};
+    void ** ops[0x100] = {};
     for (size_t i = 0; i < 0x100; i++) ops[i] = &&_handle_INST_INVALID;
     
     #define INSTX(X) ops[(X&0xFF)] = &&_handle_##X;
     INST_XMACRO()
     
     #define CASES_START() \
-    while (frame->pc < prog.i) {\
-        repanic(frame->pc)\
         uint16_t op = prog.code[frame->pc];\
         goto *ops[op & 0xFF];
-    #define CASES_END() }
+    #define CASES_END()
     
     #define PC_INC() frame->pc += op >> 8; op = prog.code[frame->pc];
     
-    #define MARK_CASE(X) _handle_##X: {
+    #define MARK_CASE(X) _handle_##X: { repanic(frame->pc);
     #define END_CASE() PC_INC(); goto *ops[op & 0xFF]; }
     #define DECAULT_CASE()
     
@@ -1011,7 +1013,7 @@ size_t interpret(size_t from_pc)
 
     CASES_START()
         #define READ_AND_GOTO_TARGET(X)\
-            { uint32_t target; memcpy(&target, prog.code + (frame->pc + X), 4); frame->pc = target; continue; }
+            { uint32_t target; memcpy(&target, prog.code + (frame->pc + X), 4); frame->pc = target; DISPATCH_IMMEDIATELY(); }
         
         MARK_CASE(INST_INVALID)     { PC_INC(); return frame->pc; }
         NEXT_CASE(INST_DISCARD)     --frame->stackpos;
