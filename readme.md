@@ -126,6 +126,15 @@ print(dict["a"])
 Functional programming:
 
 ```python
+func foreach(x, f):
+    let type = typeof(x)
+    if type == "array" or type == "string":
+        for i in len(x): f(x[i]) end
+    elif type == "dict":
+        let k = keys(x)
+        for i in len(k): f(k[i]) end
+    end
+end
 
 foreach([6.153, 4, 5, 1, 3, 52.13], lambda[](x):
     print(x)
