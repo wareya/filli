@@ -5,8 +5,8 @@
 #include <stdint.h>
 
 // Chain allocator with bulk chain segment freeing; baby's worst GC.
-
 // NOT THREAD-SAFE!!!!!
+
 void ** ma_chain = 0;
 void * ma_malloc(size_t size)
 {
