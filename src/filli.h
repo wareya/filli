@@ -13,7 +13,7 @@
 #include <stddef.h>
 #include <string.h>
 
-#define USE_TAIL_DISPATCH 1 // 40% speed boost on clang
+#define USE_TAIL_DISPATCH 1 // 40% speed boost on clang, but increases binary size by ~7KB (from ~34KB to ~41KB). worth it, IMO.
 
 #define IDENTIFIER_COUNT 32000 // max number of uniquely-spelled identifiers per program
 #define FRAME_VARCOUNT 1024 // increases memory usage of stack frames
