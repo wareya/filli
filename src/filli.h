@@ -114,10 +114,8 @@ Token * tokenize(const char * src, size_t * count)
         
         if (src[i] == '\n')
         {
-            if (newline_is_token && t > 0 && token_is(src, ret, t, t-1, "\\"))
-                t -= 1;
-            else if (newline_is_token)
-                ret[t++] = mk_token(i, 1, 3);
+            if (newline_is_token && t > 0 && token_is(src, ret, t, t-1, "\\")) t -= 1;
+            else if (newline_is_token) ret[t++] = mk_token(i, 1, 3);
             i++;
         }
         // tokenize numbers
@@ -134,8 +132,7 @@ Token * tokenize(const char * src, size_t * count)
         {
             size_t start_i = i++;
             while ((src[i] >= 'a' && src[i] <= 'z') || (src[i] >= 'A' && src[i] <= 'Z')
-                   || src[i] == '_' || (src[i] >= '0' && src[i] <= '9'))
-                i++;
+                   || src[i] == '_' || (src[i] >= '0' && src[i] <= '9')) i++;
             
             ret[t++] = mk_token(start_i, i - start_i, insert_or_lookup_id(src + start_i, i - start_i));
         }
@@ -235,11 +232,9 @@ typedef struct _CompilerData {
     uint16_t globals_reg[IDENTIFIER_COUNT];
     Funcdef funcs_reg[IDENTIFIER_COUNT + LAMBDA_COUNT];
     
-    uint32_t lambda_id;
-    uint32_t compiled_string_i, locals_reg_i, globals_n, locals_n, caps_reg_i, for_loop_index, func_depth;
+    uint32_t lambda_id, compiled_string_i, locals_reg_i, globals_n, locals_n, caps_reg_i, for_loop_index, func_depth;
 
-    uint16_t * locals_reg, * caps_reg;
-    uint16_t * locals_reg_stack[1024], * caps_reg_stack[1024];
+    uint16_t * locals_reg, * caps_reg, * locals_reg_stack[1024], * caps_reg_stack[1024];
     
     uint32_t loop_nesting, loop_cont_i, loop_break_i;
     uint32_t loop_conts[1024], loop_breaks[1024];
@@ -270,20 +265,13 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
     if (tokens[i].kind < 0)
     {
         uint16_t id = lex_ident_offset - tokens[i].kind;
-        if (token_is(source, tokens, count, i, "true"))
-            return prog_write5(PUSH_NUM, 0, 0, 0, 0x3FF0), 1;
-        else if (token_is(source, tokens, count, i, "false"))
-            return prog_write5(PUSH_NUM, 0, 0, 0, 0), 1;
-        else if (token_is(source, tokens, count, i, "null"))
-            return prog_write(PUSH_NULL), 1;
-        else if (cs->func_depth > 0 && cs->locals_reg[id])
-            prog_write2(PUSH_LOCAL, cs->locals_reg[id] - 1);
-        else if (cs->func_depth > 0 && cs->caps_reg[id])
-            prog_write2(PUSH_CAP, cs->caps_reg[id] - 1);
-        else if (cs->globals_reg[id])
-            prog_write2(PUSH_GLOBAL, cs->globals_reg[id] - 1);
-        else if (cs->funcs_reg[id].exists)
-            prog_write2(PUSH_FUNCNAME, id);
+        if (token_is(source, tokens, count, i, "true"))         return prog_write5(PUSH_NUM, 0, 0, 0, 0x3FF0), 1;
+        else if (token_is(source, tokens, count, i, "false"))   return prog_write5(PUSH_NUM, 0, 0, 0, 0), 1;
+        else if (token_is(source, tokens, count, i, "null"))    return prog_write(PUSH_NULL), 1;
+        else if (cs->func_depth > 0 && cs->locals_reg[id])      prog_write2(PUSH_LOCAL, cs->locals_reg[id] - 1);
+        else if (cs->func_depth > 0 && cs->caps_reg[id])        prog_write2(PUSH_CAP, cs->caps_reg[id] - 1);
+        else if (cs->globals_reg[id])                           prog_write2(PUSH_GLOBAL, cs->globals_reg[id] - 1);
+        else if (cs->funcs_reg[id].exists)                      prog_write2(PUSH_FUNCNAME, id);
         else
         {
             printsn(source + tokens[i].i, tokens[i].len);
@@ -988,9 +976,6 @@ size_t interpret(size_t from_pc)
     #define DECAULT_CASE()
     
     #define DISPATCH_IMMEDIATELY() op = prog.code[frame->pc]; [[clang::musttail]] return ops[op & 0xFF](frame, global_frame);
-    
-    #define NEXT_CASE(X) END_CASE() MARK_CASE(X)
-    
 #else
     
     #define CASES_START() \
@@ -1004,10 +989,8 @@ size_t interpret(size_t from_pc)
     #define DECAULT_CASE() default: print_op_and_panic(op);
     
     #define DISPATCH_IMMEDIATELY() continue
-    
-    #define NEXT_CASE(X) END_CASE() MARK_CASE(X)
-    
 #endif 
+    #define NEXT_CASE(X) END_CASE() MARK_CASE(X)
 
     CASES_START()
         #define READ_AND_GOTO_TARGET(X)\
