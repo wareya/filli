@@ -42,11 +42,11 @@
 #define LINE_STRING STRINGIZE(__LINE__)
 
 #define just_die() abort()
-#define die_now(X) { prints("Assert:\n" #X "\nat " LINE_STRING " in " __FILE__ "\n"); fflush(stdout); just_die(); }
+#define die_now(X) ( prints("Assert:\n" #X "\nat " LINE_STRING " in " __FILE__ "\n"), fflush(stdout), just_die() )
 #ifdef assert
     #undef assert
 #endif
-#define assert(X, ...) { if (!(X)) { if (__VA_OPT__(1)+0) die_now(__VA_ARGS__) else die_now(X) } }
+#define assert(X, ...) ( (!(X)) ? ( (__VA_OPT__(1)+0) ? die_now(__VA_ARGS__ "") : die_now(X) ) : (void)0 )
 #define perror(X) eprints(X)
 #define panic(...) die_now(__VA_OPT__( __VA_ARGS__))
 
