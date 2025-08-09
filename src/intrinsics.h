@@ -11,20 +11,18 @@ uint16_t dict_remove_id;
 uint16_t truthy_id;
 uint16_t not_id;
 
-void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
+void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame, size_t stackpos, size_t return_slot)
 {
-    #define STACK_PUSH2(X) {\
-        assert2(,frame->stackpos < FRAME_STACKSIZE);\
-        frame->stack[frame->stackpos++] = X; }
+    #define STACK_PUSH2(X) { frame->stack[return_slot] = X; }
     
     if (id == print_id)
     {
         for (size_t i = 0; i < argcount; i++)
         {
-            long long int offset = i - argcount;
-            int tag = frame->stack[frame->stackpos + offset].tag;
-            if      (tag == VALUE_FLOAT)    prints(baddtostr(frame->stack[frame->stackpos + offset].u.f));
-            else if (tag == VALUE_STRING)   prints(*frame->stack[frame->stackpos + offset].u.s);
+            long long int offset = i;
+            int tag = frame->stack[stackpos + offset].tag;
+            if      (tag == VALUE_FLOAT)    prints(baddtostr(frame->stack[stackpos + offset].u.f));
+            else if (tag == VALUE_STRING)   prints(*frame->stack[stackpos + offset].u.s);
             else if (tag == VALUE_ARRAY)    prints("<array>");
             else if (tag == VALUE_DICT)     prints("<dict>");
             else if (tag == VALUE_FUNC)     prints("<func>");
@@ -34,15 +32,13 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
             if (i + 1 < argcount) prints(" ");
         }
         prints("\n");
-        frame->stackpos -= argcount;
         STACK_PUSH2(val_tagged(VALUE_NULL))
     }
     else if (id == typeof_id)
     {
         assert2(, argcount == 1, "Wrong number of arguments to function");
         
-        int tag = frame->stack[frame->stackpos - 1].tag;
-        frame->stackpos -= 1;
+        int tag = frame->stack[stackpos].tag;
         if      (tag == VALUE_FLOAT)    STACK_PUSH2(val_string(stringdup("float")))
         else if (tag == VALUE_STRING)   STACK_PUSH2(val_string(stringdup("string")))
         else if (tag == VALUE_ARRAY)    STACK_PUSH2(val_string(stringdup("array")))
@@ -54,9 +50,8 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
     else if (id == len_id)
     {
         assert2(, argcount == 1, "Wrong number of arguments to function");
-        Value v = frame->stack[frame->stackpos - 1];
+        Value v = frame->stack[stackpos];
         int tag = v.tag;
-        frame->stackpos -= 1;
         if      (tag == VALUE_ARRAY)    STACK_PUSH2(val_float(v.u.a->len))
         else if (tag == VALUE_STRING)   STACK_PUSH2(val_float(strlen(*v.u.s)))
         else if (tag == VALUE_DICT)     STACK_PUSH2(val_float(v.u.d->len))
@@ -65,21 +60,20 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
     else if (id == truthy_id)
     {
         assert2(, argcount == 1, "Wrong number of arguments to function");
-        Value v = frame->stack[--frame->stackpos];
+        Value v = frame->stack[stackpos];
         STACK_PUSH2(val_float(val_truthy(v)))
     }
     else if (id == not_id)
     {
         assert2(, argcount == 1, "Wrong number of arguments to function");
-        Value v = frame->stack[--frame->stackpos];
+        Value v = frame->stack[stackpos];
         STACK_PUSH2(val_float(!val_truthy(v)))
     }
     else if (id == keys_id)
     {
         assert2(, argcount == 1, "Wrong number of arguments to function");
-        Value v = frame->stack[frame->stackpos - 1];
+        Value v = frame->stack[stackpos];
         int tag = v.tag;
-        frame->stackpos -= 1;
         if (tag == VALUE_DICT)
         {
             Value v2 = val_array(v.u.d->len);
@@ -96,15 +90,14 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
     else if (id == array_insert_id)
     {
         assert2(, argcount == 3, "Wrong number of arguments to function");
-        Value v = frame->stack[frame->stackpos - 3];
-        Value v2 = frame->stack[frame->stackpos - 2];
-        Value v3 = frame->stack[frame->stackpos - 1];
+        Value v = frame->stack[stackpos];
+        Value v2 = frame->stack[stackpos + 1];
+        Value v3 = frame->stack[stackpos + 2];
         if (v.tag == VALUE_ARRAY)
         {
             assert2(, v2.tag == VALUE_FLOAT, "Array indexes must be numbers");
             size_t index = v2.u.f;
             assert2(, index <= v.u.a->len, "Array index out of range");
-            frame->stackpos -= 3;
             if (v.u.a->len + 1 >= v.u.a->cap)
             {
                 size_t oldcap = v.u.a->cap;
@@ -125,14 +118,13 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
     else if (id == array_remove_id)
     {
         assert2(, argcount == 2, "Wrong number of arguments to function");
-        Value v = frame->stack[frame->stackpos - 2];
-        Value v2 = frame->stack[frame->stackpos - 1];
+        Value v = frame->stack[stackpos];
+        Value v2 = frame->stack[stackpos + 1];
         if (v.tag == VALUE_ARRAY)
         {
             assert2(, v2.tag == VALUE_FLOAT, "Array indexes must be numbers");
             size_t index = v2.u.f;
             assert2(, index < v.u.a->len, "Array index out of range");
-            frame->stackpos -= 2;
             if (v.u.a->len + 1 >= v.u.a->cap)
             {
                 v.u.a->cap *= 2;
@@ -150,11 +142,10 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame)
     else if (id == dict_remove_id)
     {
         assert2(, argcount == 2, "Wrong number of arguments to function");
-        Value v = frame->stack[frame->stackpos - 2];
-        Value v2 = frame->stack[frame->stackpos - 1];
+        Value v = frame->stack[stackpos];
+        Value v2 = frame->stack[stackpos + 1];
         if (v.tag == VALUE_DICT)
         {
-            frame->stackpos -= 2;
             BiValue * pair = dict_get_or_insert(v.u.d, v2);
             Value ret = pair->r;
             pair->l = val_tagged(VALUE_TOMBSTONE);
