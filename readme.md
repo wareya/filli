@@ -196,5 +196,5 @@ Filli has not been fuzzed, but makes an effort to avoid doing anything stupidly 
 
 ## License
 
-Apache 2.0 and/or MIT, at your choice. Coypright 2025 "wareya" and any contributors.
+Apache 2.0 and/or MIT, at your choice. Copyright 2025 "wareya" and any contributors.
 
