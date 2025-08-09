@@ -37,11 +37,12 @@
 #include "microlib.h"
 
 const char * filli_err = 0;
-#define assert2(N, X, ...) { if (!(X)) { if (__VA_OPT__(1)+0) filli_err = #__VA_ARGS__; else filli_err = #X; return N; } }
-//#define assert2(N, X, ...) assert(X, __VA_ARGS__)
-#define panic2(N, X) { filli_err = #X; return N; }
-//#define panic2(N, X) panic(X)
-#define repanic(N) { if (filli_err) return N; }
+//#define assert2(N, X, ...) { if (!(X)) { if (__VA_OPT__(1)+0) filli_err = #__VA_ARGS__; else filli_err = #X; return N; } }
+#define assert2(N, X, ...) assert(X, __VA_ARGS__)
+//#define panic2(N, X) { filli_err = #X; return 0; }
+#define panic2(N, X) panic(X)
+//#define repanic(N) { if (filli_err) return 0; }
+#define repanic(N) { }
 
 void * zalloc(size_t s) { char * r = (char *)malloc(s); if (!r) panic("Out of memory"); memset(r, 0, s); return r; }
 
@@ -234,14 +235,12 @@ typedef struct _Funcdef {
 } Funcdef;
 
 typedef struct _CompilerData {
-    const char * compiled_strings[1<<16];
+    const char * compiled_strings[1<<16]; // used at runtime
+    Funcdef funcs_reg[IDENTIFIER_COUNT + LAMBDA_COUNT]; // used at runtime
+    
     uint16_t globals_reg[IDENTIFIER_COUNT];
-    Funcdef funcs_reg[IDENTIFIER_COUNT + LAMBDA_COUNT];
-    
     uint32_t lambda_id, compiled_string_i, locals_reg_i, globals_n, locals_n, caps_reg_i, for_loop_index, func_depth;
-
     uint16_t * locals_reg, * caps_reg, * locals_reg_stack[1024], * caps_reg_stack[1024];
-    
     uint32_t loop_nesting, loop_cont_i, loop_break_i, loop_conts[1024], loop_breaks[1024];
 } CompilerState;
 
@@ -945,71 +944,37 @@ void print_op_and_panic(uint16_t op) { prints("---\n"); printu16hex(op); prints(
 
 void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame);
 
-#define INSTX(X) size_t _handler_##X(Frame *, Frame *);
+#define INSTX(X) size_t _handler_##X();
 INST_XMACRO()
 #undef INSTX
 
-size_t (*ops[0x100])(Frame * frame, Frame * global_frame) = {};
+typedef size_t (*handler)();
+handler ops[0x100] = {};
+
+extern Frame * frame;
+extern Frame * global_frame;
 
 uint32_t fi_mem_read_u32(void * from) { uint32_t n; memcpy(&n, from, 4); return n; }
 double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
 
-size_t interpret(size_t from_pc)
-{
-    Frame * frame = (Frame *)zalloc(sizeof(Frame));
-    Frame * global_frame = frame;
-    
-    frame->pc = from_pc;
-
-#if USE_TAIL_DISPATCH
-    
-    // Tail-call "threaded" dispatch is an interpreter design technique where opcode handlers are functions that
-    //  jump directly to the next opcode instead of returning to a handler. This suppresses code-sharing optimizations
-    //  that can cause the compiler to generate code that thrashes the branch predictor, and also forces each dispatch
-    //  to depend on which opcode it's coming from. This allows the CPU's branch predictor to learn that, for example,
-    //  a particular opcode is almost always followed by a particular other opcode, and to always predict that other
-    //  opcode when proceeding from the first one.
-    
-    // To avoid code duplication, we use macros to swap out the dispatch system, instead of hardcoding both systems.
-    
-    for (size_t i = 0; i < 0x100; i++) ops[i] = _handler_INST_INVALID;
-    
-    #define INSTX(X) ops[(X&0xFF)] = _handler_##X;
-    INST_XMACRO()
-    
-    #define CASES_START() uint16_t op = prog.code[frame->pc]; return ops[op & 0xFF](frame, global_frame);
+    #define CASES_START()
     #define CASES_END()
     
     #define PC_INC() frame->pc += op >> 8; op = prog.code[frame->pc];
     
-    #define MARK_CASE(X) } size_t _handler_##X(Frame * frame, Frame * global_frame) { uint16_t op = X; repanic(frame->pc);
-    #define END_CASE() PC_INC(); __attribute__((musttail)) return ops[op & 0xFF](frame, global_frame);
+    #define MARK_CASE(X) size_t _handler_##X() { uint16_t op = X; repanic(frame->pc);
+    #define END_CASE() PC_INC(); return 0; }
     #define DECAULT_CASE()
     
-    #define DISPATCH_IMMEDIATELY() op = prog.code[frame->pc]; __attribute__((musttail)) return ops[op & 0xFF](frame, global_frame);
-#else
+    #define DISPATCH_IMMEDIATELY() op = prog.code[frame->pc]; return frame->pc + 1;
     
-    // This, on the other hand, is a conventional loop-over-switch-statement interpreter dispatch system.
-    
-    #define CASES_START() \
-    while (frame->pc < prog.i) { repanic(frame->pc); uint16_t op = prog.code[frame->pc]; switch (op) {
-    #define CASES_END() } } return frame->pc;
-    
-    #define PC_INC() frame->pc += op >> 8
-    
-    #define MARK_CASE(X) case X: {
-    #define END_CASE() PC_INC(); continue; }
-    #define DECAULT_CASE() default: print_op_and_panic(op);
-    
-    #define DISPATCH_IMMEDIATELY() continue
-#endif 
     #define NEXT_CASE(X) END_CASE() MARK_CASE(X)
 
     CASES_START()
         #define READ_AND_GOTO_TARGET(X)\
             { uint32_t target = fi_mem_read_u32(prog.code + (frame->pc + X)); frame->pc = target; DISPATCH_IMMEDIATELY(); }
         
-        MARK_CASE(INST_INVALID)     { PC_INC(); return frame->pc; }
+        MARK_CASE(INST_INVALID)     { PC_INC(); return 0; }
         NEXT_CASE(INST_DISCARD)     --frame->stackpos;
         NEXT_CASE(INST_FUNCDEF)     READ_AND_GOTO_TARGET(1)
         
@@ -1064,19 +1029,19 @@ size_t interpret(size_t from_pc)
             v2.u.a->buf[0] = v;
             v2.u.a->buf[1] = val_funcstate(frame->fn, frame);
             
-            if (!frame->return_to) return frame->pc;
+            if (!frame->return_to) return 0;
             frame = frame->return_to;
             
             STACK_PUSH(v2) DISPATCH_IMMEDIATELY();
         
         NEXT_CASE(INST_RETURN_VAL)
             Value v = frame->stack[--frame->stackpos];
-            if (!frame->return_to) { PC_INC(); return frame->pc; }
+            if (!frame->return_to) { PC_INC(); return 0; }
             frame = frame->return_to;
             STACK_PUSH(v) DISPATCH_IMMEDIATELY();
         
         NEXT_CASE(INST_RETURN_VOID)
-            if (!frame->return_to) { PC_INC(); return frame->pc; }
+            if (!frame->return_to) { PC_INC(); return 0; }
             frame = frame->return_to;
             STACK_PUSH(val_tagged(VALUE_NULL)) DISPATCH_IMMEDIATELY();
         
@@ -1253,7 +1218,6 @@ size_t interpret(size_t from_pc)
         END_CASE()
         DECAULT_CASE()
     CASES_END()
-}
 
 void register_intrinsic_func(const char * s)
 {
@@ -1262,5 +1226,103 @@ void register_intrinsic_func(const char * s)
 }
 
 #include "intrinsics.h"
+
+void filli_aot(void)
+{
+    puts("#include <stdlib.h>");
+    puts("#include <gc.h>");
+    puts("#include <assert.h>");
+    puts("#define malloc(X) GC_MALLOC(X)");
+    puts("#define free(X) GC_FREE(X)");
+    puts("#include \"filli.h\"");
+    puts("");
+    
+    puts("Frame * frame;");
+    puts("Frame * global_frame;");
+    puts("");
+    
+    puts("int main(void) {");
+    
+    printf("lex_init();\n");
+    printf("compiler_state_init();\n");
+    printf("register_intrinsic_funcs();\n");
+    
+    for (size_t i = 0; i < cs->compiled_string_i; i++)
+    {
+        printf("cs->compiled_strings[%zu] = \"", i);
+        const char * s = cs->compiled_strings[i];
+        while (*s)
+        {
+            if (*s == '\\') printf("\\\\");
+            else if (*s == '\n') printf("\\n");
+            else if (*s == '\r') printf("\\r");
+            else if (*s == '\t') printf("\\t");
+            else if (*s == '"') printf("\\\"");
+            else printf("%c", *s);
+            s++;
+        }
+        printf("\";\n");
+    }
+    printf("// end of string table init\n\n");
+    for (size_t i = 0; i < IDENTIFIER_COUNT + LAMBDA_COUNT; i++)
+    {
+        if (!cs->funcs_reg[i].exists) continue;
+        printf("cs->funcs_reg[%zu].exists = 1;\n", i);
+        printf("cs->funcs_reg[%zu].intrinsic = %u;\n", i, cs->funcs_reg[i].intrinsic);
+        printf("cs->funcs_reg[%zu].argcount = %u;\n", i, cs->funcs_reg[i].argcount);
+        printf("cs->funcs_reg[%zu].id = %u;\n", i, cs->funcs_reg[i].id);
+        printf("cs->funcs_reg[%zu].loc = %u;\n", i, cs->funcs_reg[i].loc);
+        printf("cs->funcs_reg[%zu].cap_count = %u;\n", i, cs->funcs_reg[i].cap_count);
+        
+        if (cs->funcs_reg[i].argcount)
+            printf("cs->funcs_reg[%zu].args = (uint16_t *)malloc(sizeof(uint16_t) * %u);\n", i, cs->funcs_reg[i].argcount);
+        for (size_t j = 0; j < cs->funcs_reg[i].argcount; j++)
+            printf("cs->funcs_reg[%zu].args[%zu] = %u;\n", i, j, cs->funcs_reg[i].args[j]);
+        
+        if (cs->funcs_reg[i].cap_count)
+            printf("cs->funcs_reg[%zu].caps = (int16_t *)malloc(sizeof(int16_t) * %u);\n", i, cs->funcs_reg[i].cap_count);
+        for (size_t j = 0; j < cs->funcs_reg[i].cap_count; j++)
+            printf("cs->funcs_reg[%zu].caps[%zu] = %d;\n", i, j, cs->funcs_reg[i].caps[j]);
+    }
+    printf("// end of function table init\n\n");
+    
+    
+    
+    puts("frame = (Frame *)zalloc(sizeof(Frame));");
+    puts("global_frame = frame;");
+    puts("frame->pc = 0;");
+    printf("void ** labels[%u] = {};\n", prog.i + 1);
+    puts("prog.code = (uint16_t *)malloc(10);");
+    
+    size_t j = 0;
+    for (size_t i = 0; j < prog.i; i++)
+    {
+        printf("labels[%zu] = &&_ADDR_%zu;\n", j, j);
+        j += prog.code[j] >> 8;
+    }
+    
+    const char * ops[0x100] = {};
+    for (size_t i = 0; i < 0x100; i++) ops[i] = "_handler_INST_INVALID";
+    #define INSTX(X) ops[(X&0xFF)] = "_handler_" #X;
+    INST_XMACRO()
+    
+    j = 0;
+    for (size_t i = 0; j < prog.i; i++)
+    {
+        printf("_ADDR_%zu: {\n", j);
+        printf("    prog.capacity = 10;\n");
+        printf("    prog.i = 0;\n");
+        printf("    frame->pc = 0;\n");
+        for (size_t k = 0; k < (prog.code[j] >> 8); k++)
+            printf("    prog.code[%zu] = %u;\n", k, prog.code[j+k]);
+        printf("    size_t dest = %s();\n", ops[prog.code[j] & 0xFF]);
+        printf("    if (dest > 0) { goto *labels[dest-1]; }\n");
+        j += prog.code[j] >> 8;
+        
+        printf("}\n");
+    }
+    
+    puts("}");
+}
 
 #endif

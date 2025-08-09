@@ -68,20 +68,7 @@ int main(int argc, char ** argv)
         return 0;
     }
 
-    for (size_t i = 0; i < prog.i; i++)
-    {
-        printu16hex(prog.code[i]);
-        prints("\n");
-    }
-    
-    interpret(0);
-    
-    if (filli_err)
-    {
-        fputs("Interpreter produced error:\n", stdout);
-        fputs(filli_err, stdout);
-        fputs("\n", stdout);
-    }
+    filli_aot();
     
     #ifdef MICROARENA
     ma_free_checkpoint(0);

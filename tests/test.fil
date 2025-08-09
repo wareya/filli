@@ -2,113 +2,16 @@ print("h")
 
 print("q")
 
-func calc(n):
-    let sum = 0
-    let flip = 1
-    print(n)
-    print(sum)
-    print(flip)
-    for i in n:
-        sum += flip / (2 * i + 1)
-        flip *= -1
-    end
-    return sum
+let n = 100000000
+let sum = 0
+let flip = 1
+print(n)
+print(sum)
+print(flip)
+for i in n:
+    sum += flip / (2 * i + 1)
+    flip *= -1
 end
-
-let sum = calc(100000)
 
 print(sum * 4)
 print("Done!")
-print("Done!"[4])
-print([5, 4, 3, 2, 1, 0][4])
-print([5, 4, 3, 2, 1, 0])
-print("----")
-print([5, 4, 3, 2, 1, 0] == 4)
-print(4 == 4)
-print(1.0 == 4.0)
-print(0/0 == 1/0)
-print(0/0 == 0/0)
-print(0/0 != 0/0)
-print(0/0 != 1/0)
-
-print("-----")
-let n = 6
-if n:
-    n -= 1
-    print(n)
-    print("sdvkqruwgkqfjaer")
-elif 1.0:
-    print("in elif 1")
-elif 1.0:
-    print("in elif 2")
-else:
-    print("not a thing")
-end
-
-print("----")
-n = 10
-while n:
-    n -= 1
-    if n == 8: continue end
-    if n == 4: break end
-    print(n)
-end
-print("----")
-
-for n in 10:
-    if n == 4: continue end
-    if n == 8: break end
-    print(n)
-end
-print("----")
-
-print("fakjaeirgawfasdsafhsrjyrth")
-
-let array = [3,1,4,5];
-print(array[2]);
-array[2] += 3;
-print(array[2]);
-array[2] = 1.414;
-print(array[2]);
-
-let string = "Hello, world!"
-print(string)
-string[0] = "h"
-print(string)
-string[6] = "_"
-print(string)
-
-let dict = {}
-
-print(dict)
-print(dict["a"])
-dict["a"] = 429.351293;
-print(dict["a"])
-
-print(true)
-print(false)
-print(null)
-
-print(1 and 1)
-print(1 or 1)
-print(1 and 0)
-print(1 or 0)
-print(0 and 0)
-print(0 or 0)
-
-func fwrap():
-    let z = 5 + 1
-    let f = lambda[z](): z -= 0.93 print(z) end
-    f()
-    f()
-    return f
-end
-
-let f = fwrap()
-f()
-f()
-
-print("x")
-
-let q
-print(q)
