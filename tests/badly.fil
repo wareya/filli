@@ -1,3 +1,5 @@
+func fa(sq): sq[2] = "Q" print(sq) end
+
 func asdf():
     print(5)
     return 0.0

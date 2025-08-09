@@ -720,6 +720,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
             if (token_is(source, tokens, count, old_i, "-=")) prog_write2(INST_SET_LOC_SUB, COMP_SPOP);
             if (token_is(source, tokens, count, old_i, "*=")) prog_write2(INST_SET_LOC_MUL, COMP_SPOP);
             if (token_is(source, tokens, count, old_i, "/=")) prog_write2(INST_SET_LOC_DIV, COMP_SPOP);
+            COMP_SPOP;
         }
         else { COMP_SPOP; }
         return r;
@@ -765,6 +766,7 @@ size_t compile_register_func(const char * source, Token * tokens, size_t count, 
     i += compile_statementlist(source, tokens, count, i);
     prog_write(INST_RETURN_VOID);
     assert2(0, tokens[i++].kind == -11, "Expected 'end'");
+    assert(cs->stackpos[cs->func_depth] == 0);
     cs->func_depth--;
     return i - orig_i;
 }
@@ -1020,7 +1022,7 @@ size_t interpret(size_t from_pc)
         #define READ_AND_GOTO_TARGET(X)\
             { uint32_t target = fi_mem_read_u32(prog.code + (frame->pc + X)); frame->pc = target; DISPATCH_IMMEDIATELY(); }
         
-        MARK_CASE(INST_INVALID)     { PC_INC(); return frame->pc; }
+        MARK_CASE(INST_INVALID)     { panic("sdfakarwiu"); }
         NEXT_CASE(INST_FUNCDEF)     READ_AND_GOTO_TARGET(1)
         
         #define PROG_IDX(X) prog.code[frame->pc + (X)]
@@ -1181,8 +1183,8 @@ size_t interpret(size_t from_pc)
             if (frame->vars[id].u.f < frame->forloops[idx]) READ_AND_GOTO_TARGET(3)
         
         NEXT_CASE(INST_JMP)    READ_AND_GOTO_TARGET(1)
-        NEXT_CASE(INST_JMP_IF_FALSE)    if (!val_truthy(frame->stack[PROG_IDX(5)])) READ_AND_GOTO_TARGET(1)
-        NEXT_CASE(INST_JMP_IF_TRUE)     if ( val_truthy(frame->stack[PROG_IDX(5)])) READ_AND_GOTO_TARGET(1)
+        NEXT_CASE(INST_JMP_IF_FALSE)    if (!val_truthy(frame->stack[PROG_IDX(3)])) READ_AND_GOTO_TARGET(1)
+        NEXT_CASE(INST_JMP_IF_TRUE)     if ( val_truthy(frame->stack[PROG_IDX(3)])) READ_AND_GOTO_TARGET(1)
         
         NEXT_CASE(PUSH_STRING)      STACK_PUSH(2, val_string(stringdup(cs->compiled_strings[PROG_IDX(1)])))
         
@@ -1233,7 +1235,7 @@ size_t interpret(size_t from_pc)
     
         NEXT_CASE(INST_INDEX)    INDEX_SHARED(<=)
             if (v1.tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *));
-                *ss = stringdupn(*v1.u.s + (size_t)v2.u.f, 1); }
+                *ss = stringdupn(*v1.u.s + (size_t)v2.u.f, 1); v1.u.s = ss; }
             if (v1.tag == VALUE_ARRAY)  v1 = *array_get(v1.u.a, v2.u.f);
             if (v1.tag == VALUE_DICT)   v1 = dict_get_or_insert(v1.u.d, v2)->r;
             frame->stack[PROG_IDX(1)] = v1;
