@@ -976,7 +976,6 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
         NEXT_CASE(INST_FUNCDEF)     READ_AND_GOTO_TARGET(1)
         
         #define STACK_PUSH(X)\
-            assert2(0, (*frame)->stackpos < FRAME_STACKSIZE);\
             Value ___cx = (X);\
             (*frame)->stack[(*frame)->stackpos++] = ___cx;
         
