@@ -740,6 +740,9 @@ size_t compile_statementlist(const char * source, Token * tokens, size_t count, 
 
 size_t compile_register_func(const char * source, Token * tokens, size_t count, uint16_t id, uint32_t i)
 {
+    cs->func_depth++;
+    cs->stackpos[cs->func_depth] = 0;
+    
     size_t orig_i = i;
     
     if (!token_is(source, tokens, count, i++, "(")) panic2(0, "Invalid funcdef");
@@ -762,6 +765,7 @@ size_t compile_register_func(const char * source, Token * tokens, size_t count, 
     i += compile_statementlist(source, tokens, count, i);
     prog_write(INST_RETURN_VOID);
     assert2(0, tokens[i++].kind == -11, "Expected 'end'");
+    cs->func_depth--;
     return i - orig_i;
 }
 
@@ -775,10 +779,7 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
     prog_write3(INST_FUNCDEF, 0, 0);
     size_t len_offs = prog.i - 2;
     
-    cs->func_depth++;
-    cs->stackpos[cs->func_depth] = 0;
     i += compile_register_func(source, tokens, count, id, i);
-    cs->func_depth--;
     
     memcpy(prog.code + len_offs, &prog.i, 4);
     
@@ -794,10 +795,7 @@ size_t compile_lambda(const char * source, Token * tokens, size_t count, size_t 
     size_t id_offs = prog.i - 5;
     memcpy(prog.code + id_offs, &id, 4);
     
-    cs->func_depth++;
-    cs->stackpos[cs->func_depth] = 0;
     i += compile_register_func(source, tokens, count, id, i);
-    cs->func_depth--;
     
     cs->funcs_reg[id].caps = caps;
     cs->funcs_reg[id].cap_count = caps_count;
@@ -1046,7 +1044,6 @@ size_t interpret(size_t from_pc)
                 frame = next;\
                 assert2(0, argcount == fn->argcount, "Function arg count doesn't match");\
                 if (!(FORCED)) for (size_t i = 0; i < fn->argcount; i++) {\
-                    printf("filling %zu\n", i);\
                     frame->vars[i] = prev->stack[idx + i]; Value * v = &frame->vars[i];\
                     if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; } }\
                 if (!(FORCED)) { frame->pc = fn->loc; if (fn->cap_data) frame->caps = fn->cap_data; }\
@@ -1065,7 +1062,12 @@ size_t interpret(size_t from_pc)
             Funcdef * fn = v_func.tag == VALUE_FUNC ? v_func.u.fn : v_func.u.fs->fn;
             ENTER_FUNC(PROG_IDX(2) + 1, PROG_IDX(2), v_func.tag == VALUE_FUNC ? 0 : v_func.u.fs->frame)
         
+        #define RETURN_WITH(X) if (!frame->return_to) { PC_INC(); return frame->pc; }\
+            Value retval = (X); frame = frame->return_to; frame->stack[frame->return_slot] = retval; DISPATCH_IMMEDIATELY();
+        
         NEXT_CASE(INST_YIELD)
+            if (!frame->return_to) panic2(, "Attempted to yield from not inside of a function");
+            
             PC_INC();
             
             Value v = frame->stack[PROG_IDX(1)];
@@ -1073,23 +1075,13 @@ size_t interpret(size_t from_pc)
             v2.u.a->buf[0] = v;
             v2.u.a->buf[1] = val_funcstate(frame->fn, frame);
             
-            if (!frame->return_to) return frame->pc;
-            frame = frame->return_to;
-            frame->stack[frame->return_slot] = v2;
-            DISPATCH_IMMEDIATELY();
+            RETURN_WITH(v2);
         
         NEXT_CASE(INST_RETURN_VAL)
-            Value v = frame->stack[PROG_IDX(1)];
-            if (!frame->return_to) { PC_INC(); return frame->pc; }
-            frame = frame->return_to;
-            frame->stack[frame->return_slot] = v;
-            DISPATCH_IMMEDIATELY();
+            RETURN_WITH(frame->stack[PROG_IDX(1)]);
         
         NEXT_CASE(INST_RETURN_VOID)
-            if (!frame->return_to) { PC_INC(); return frame->pc; }
-            frame = frame->return_to;
-            frame->stack[frame->return_slot] = val_tagged(VALUE_NULL);
-            DISPATCH_IMMEDIATELY();
+            RETURN_WITH(val_tagged(VALUE_NULL));
         
         NEXT_CASE(PUSH_NULL)    STACK_PUSH(1, val_tagged(VALUE_NULL))
         
