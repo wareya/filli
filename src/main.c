@@ -28,7 +28,9 @@ int main(int argc, char ** argv)
 #ifdef USE_GC
     GC_INIT();
 #endif
-    init_program();
+    Program prog;
+    global_prog = &prog;
+    init_program(global_prog);
     lex_init();
     compiler_state_init();
     register_intrinsic_funcs();
