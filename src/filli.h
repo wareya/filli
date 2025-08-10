@@ -38,11 +38,11 @@
 
 const char * filli_err = 0;
 //#define assert2(N, X, ...) { if (!(X)) { if (__VA_OPT__(1)+0) filli_err = #__VA_ARGS__; else filli_err = #X; return N; } }
-//#define assert2(N, X, ...) assert(X, __VA_ARGS__)
-#define assert2(N, X, ...) { (void)(X); }
+#define assert2(N, X, ...) assert(X, __VA_ARGS__)
+//#define assert2(N, X, ...) { (void)(X); }
 //#define panic2(N, X) { filli_err = #X; return N; }
-//#define panic2(N, X) panic(X)
-#define panic2(N, X) {}
+#define panic2(N, X) panic(X)
+//#define panic2(N, X) {}
 //#define repanic(N) { if (filli_err) return -1; }
 #define repanic(N) { }
 
