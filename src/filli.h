@@ -38,8 +38,11 @@
 
 const char * filli_err = 0;
 //#define assert2(N, X, ...) { if (!(X)) { if (__VA_OPT__(1)+0) filli_err = #__VA_ARGS__; else filli_err = #X; return N; } }
+//#define assert2(N, X, ...) { if (!(X)) { if (__VA_OPT__(1)+0) eprints(#__VA_ARGS__); else eprints(#X); return N; } }
+//#define assert2(N, X, ...) { if (!(X)) { eprints( (__VA_OPT__(1)+0) ? #__VA_ARGS__ : #X ); return N; } }
+//#define assert2(N, X, ...) { if (!(X)) { return N; } }
 #define assert2(N, X, ...) assert(X, __VA_ARGS__)
-//#define assert2(N, X, ...) { (void)(X); }
+//#define assert2(N, X, ...) ((void)(X))
 //#define panic2(N, X) { filli_err = #X; return N; }
 #define panic2(N, X) panic(X)
 //#define panic2(N, X) {}
@@ -178,7 +181,7 @@ Token * tokenize(const char * src, size_t * count)
 
 enum { INST_INVALID = 0x000,
     // zero-op
-    INST_RETURN_VOID = 0x100,
+    INST_RETURN_VOID = 0x100, INST_FUNCSETUP,
     // 1-op
     INST_RETURN_VAL = 0x210, INST_YIELD, PUSH_NULL, PUSH_DICT_EMPTY,
     INST_SET_LOC, INST_SET_LOC_ADD, INST_SET_LOC_SUB, INST_SET_LOC_MUL, INST_SET_LOC_DIV,
@@ -202,7 +205,7 @@ enum { INST_INVALID = 0x000,
     PUSH_NUM = 0x6a0, INST_LAMBDA, INST_FORSTART 
 };
 
-#define INST_XMACRO() INSTX(INST_INVALID) INSTX(PUSH_NULL) INSTX(PUSH_DICT_EMPTY) INSTX(INST_RETURN_VAL) INSTX(INST_RETURN_VOID) INSTX(INST_YIELD) INSTX(INST_ADD) INSTX(INST_SUB) INSTX(INST_MUL) INSTX(INST_DIV) INSTX(INST_CMP_AND) INSTX(INST_CMP_OR) INSTX(INST_SET_LOC) INSTX(INST_SET_LOC_ADD) INSTX(INST_SET_LOC_SUB) INSTX(INST_SET_LOC_MUL) INSTX(INST_SET_LOC_DIV) INSTX(INST_INDEX) INSTX(INST_INDEX_LOC) INSTX(INST_CMP_EQ) INSTX(INST_CMP_NE) INSTX(INST_CMP_GT) INSTX(INST_CMP_LT) INSTX(INST_CMP_GE) INSTX(INST_CMP_LE) INSTX(PUSH_FUNCNAME) INSTX(INST_FUNCCALL_REF) INSTX(PUSH_STRING) INSTX(INST_ARRAY_LITERAL) INSTX(PUSH_LOCAL) INSTX(PUSH_GLOBAL) INSTX(PUSH_CAP) INSTX(INST_SET) INSTX(INST_SET_GLOBAL) INSTX(INST_SET_CAP) INSTX(INST_SET_ADD) INSTX(INST_SET_GLOBAL_ADD) INSTX(INST_SET_CAP_ADD) INSTX(INST_SET_SUB) INSTX(INST_SET_GLOBAL_SUB) INSTX(INST_SET_CAP_SUB) INSTX(INST_SET_MUL) INSTX(INST_SET_GLOBAL_MUL) INSTX(INST_SET_CAP_MUL) INSTX(INST_SET_DIV) INSTX(INST_SET_GLOBAL_DIV) INSTX(INST_SET_CAP_DIV) INSTX(INST_JMP) INSTX(INST_JMP_IF_FALSE) INSTX(INST_JMP_IF_TRUE) INSTX(INST_FUNCDEF) INSTX(INST_FUNCCALL) INSTX(PUSH_NUM) INSTX(INST_FOREND) INSTX(INST_FORSTART) INSTX(INST_LAMBDA)
+#define INST_XMACRO() INSTX(INST_INVALID) INSTX(PUSH_NULL) INSTX(PUSH_DICT_EMPTY) INSTX(INST_RETURN_VAL) INSTX(INST_RETURN_VOID) INSTX(INST_YIELD) INSTX(INST_ADD) INSTX(INST_SUB) INSTX(INST_MUL) INSTX(INST_DIV) INSTX(INST_CMP_AND) INSTX(INST_CMP_OR) INSTX(INST_SET_LOC) INSTX(INST_SET_LOC_ADD) INSTX(INST_SET_LOC_SUB) INSTX(INST_SET_LOC_MUL) INSTX(INST_SET_LOC_DIV) INSTX(INST_INDEX) INSTX(INST_INDEX_LOC) INSTX(INST_CMP_EQ) INSTX(INST_CMP_NE) INSTX(INST_CMP_GT) INSTX(INST_CMP_LT) INSTX(INST_CMP_GE) INSTX(INST_CMP_LE) INSTX(PUSH_FUNCNAME) INSTX(INST_FUNCCALL_REF) INSTX(PUSH_STRING) INSTX(INST_ARRAY_LITERAL) INSTX(PUSH_LOCAL) INSTX(PUSH_GLOBAL) INSTX(PUSH_CAP) INSTX(INST_SET) INSTX(INST_SET_GLOBAL) INSTX(INST_SET_CAP) INSTX(INST_SET_ADD) INSTX(INST_SET_GLOBAL_ADD) INSTX(INST_SET_CAP_ADD) INSTX(INST_SET_SUB) INSTX(INST_SET_GLOBAL_SUB) INSTX(INST_SET_CAP_SUB) INSTX(INST_SET_MUL) INSTX(INST_SET_GLOBAL_MUL) INSTX(INST_SET_CAP_MUL) INSTX(INST_SET_DIV) INSTX(INST_SET_GLOBAL_DIV) INSTX(INST_SET_CAP_DIV) INSTX(INST_JMP) INSTX(INST_JMP_IF_FALSE) INSTX(INST_JMP_IF_TRUE) INSTX(INST_FUNCDEF) INSTX(INST_FUNCCALL) INSTX(PUSH_NUM) INSTX(INST_FOREND) INSTX(INST_FORSTART) INSTX(INST_LAMBDA) INSTX(INST_FUNCSETUP)
 
 typedef struct _Program { uint16_t * code; uint32_t capacity; uint32_t i; uint32_t real_pc; uint8_t * is_jumptarget; } Program;
 void init_program(Program * prog) { prog->capacity = PROGRAM_MAXLEN; prog->code = (uint16_t *)zalloc(sizeof(uint16_t) * prog->capacity); prog->is_jumptarget = (uint8_t *)zalloc(prog->capacity); prog->i = 0; }
@@ -688,7 +691,8 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         
         for (size_t i = 0; i < j; i++) (void)COMP_SPOP;
         prog_write4(INST_FUNCCALL, id, j, COMP_S);
-        global_prog->is_jumptarget[global_prog->i] |= 2;
+        if (!cs->funcs_reg[id].intrinsic)
+            global_prog->is_jumptarget[global_prog->i] |= 2;
         
         return i - orig_i;
     }
@@ -792,6 +796,7 @@ size_t compile_register_func(const char * source, Token * tokens, size_t count, 
     
     global_prog->is_jumptarget[global_prog->i] = 3;
     
+    prog_write(INST_FUNCSETUP);
     i += compile_statementlist(source, tokens, count, i);
     prog_write(INST_RETURN_VOID);
     assert2(0, tokens[i++].kind == -11, "Expected 'end'");
@@ -839,6 +844,7 @@ size_t compile_lambda(const char * source, Token * tokens, size_t count, size_t 
 }
 size_t compile(const char * source, Token * tokens, size_t count, size_t i)
 {
+    prog_write(INST_FUNCSETUP);
     size_t r, orig_i = i;
     while (i < count)
     {
@@ -973,6 +979,8 @@ uint8_t val_truthy(Value v)
     return 0;
 }
 
+typedef struct _LoopPair { uint32_t l; uint32_t r; } LoopPair;
+
 typedef struct _Frame {
     uint32_t pc;
     uint32_t return_slot;
@@ -981,7 +989,7 @@ typedef struct _Frame {
     Value * set_tgt_agg;
     char * set_tgt_char;
     Value stack[FRAME_STACKSIZE], vars[FRAME_VARCOUNT];
-    double forloops[FORLOOP_COUNT_LIMIT];
+    LoopPair forloops[FORLOOP_COUNT_LIMIT];
     Value ** caps;
     Funcdef * fn;
 } Frame;
@@ -1006,7 +1014,8 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
     #define END_CASE() PC_INC(); return 0; }
     #define DISPATCH_IMMEDIATELY() return next_pc + 1;
     
-    #define STACK_POP(N, M) (*frame)->stack[PROG_IDX(N)+(M)]; (*frame)->stack[PROG_IDX(N)+(M)] = _empty_value;
+    //#define STACK_POP(N, M) (*frame)->stack[PROG_IDX(N)+(M)]; //(*frame)->stack[PROG_IDX(N)+(M)] = _empty_value;
+    #define STACK_POP(N, M) (*frame)->stack[PROG_IDX(N)+(M)]; (*frame)->stack[PROG_IDX(N)+(M)].tag = 0;
     
     #define NEXT_CASE(X) END_CASE() MARK_CASE(X)
 
@@ -1015,6 +1024,15 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
             { uint32_t target = fi_mem_read_u32(prog->code + X); next_pc = target; DISPATCH_IMMEDIATELY(); }
         MARK_CASE(INST_INVALID)     { panic("Attempted to run invalid code."); }
         NEXT_CASE(INST_FUNCDEF)     READ_AND_GOTO_TARGET(1)
+        NEXT_CASE(INST_FUNCSETUP)
+        /*
+            if ((*frame)->fn)
+                memset((*frame)->vars + (*frame)->fn->argcount, 0, sizeof(Value) * (FRAME_VARCOUNT - (*frame)->fn->argcount));
+            else
+                memset((*frame)->vars, 0, sizeof(Value) * FRAME_VARCOUNT);
+            memset((*frame)->stack, 0, sizeof(Value) * FRAME_STACKSIZE);
+            memset((*frame)->forloops, 0, sizeof(LoopPair) * FORLOOP_COUNT_LIMIT);
+        */
         #define PROG_IDX(X) prog->code[(X)]
         #define STACK_PUSH(X, Y) { (*frame)->stack[PROG_IDX(X)] = (Y); }
         NEXT_CASE(INST_ARRAY_LITERAL)
@@ -1025,7 +1043,7 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
         
         #define ENTER_FUNC(IDX, RETURN_SLOT, FORCED)\
             uint32_t idx = (IDX); uint32_t return_slot = (RETURN_SLOT);\
-            assert2(0, fn->exists, "Function does not exist");\
+            assert2(-1, fn->exists, "Function does not exist");\
             if (!fn->intrinsic) {\
                 PC_INC(); Frame * prev = *frame;\
                 Frame * next = (FORCED) ? (FORCED) : (Frame *)zalloc(sizeof(Frame));\
@@ -1034,7 +1052,7 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
                 next->return_pc = prog->real_pc + (op >> 8);\
                 (*frame)->return_slot = return_slot;\
                 *frame = next;\
-                assert2(0, argcount == fn->argcount, "Function arg count doesn't match");\
+                assert2(-1, argcount == fn->argcount, "Function arg count doesn't match");\
                 if (!(FORCED)) for (size_t i = 0; i < fn->argcount; i++) {\
                     (*frame)->vars[i] = prev->stack[idx + i]; Value * v = &(*frame)->vars[i];\
                     if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; } }\
@@ -1051,7 +1069,7 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
         NEXT_CASE(INST_FUNCCALL_REF)
             uint16_t argcount = PROG_IDX(1);
             Value v_func = STACK_POP(2, 0);
-            assert2(0, v_func.tag == VALUE_FUNC || v_func.tag == VALUE_STATE, "Tried to call a non-function");
+            assert2(-1, v_func.tag == VALUE_FUNC || v_func.tag == VALUE_STATE, "Tried to call a non-function");
             Funcdef * fn = v_func.tag == VALUE_FUNC ? v_func.u.fn : v_func.u.fs->fn;
             ENTER_FUNC(PROG_IDX(2) + 1, PROG_IDX(2), v_func.tag == VALUE_FUNC ? 0 : v_func.u.fs->frame)
         
@@ -1108,7 +1126,7 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
             Value v2 = STACK_POP(1, 0);\
             uint16_t id = PROG_IDX(1);\
             Value v1 = global_frame->vars[id];\
-            assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
+            assert2(-1, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
             global_frame->vars[id] = val_float(v1.u.f X v2.u.f);
         
         NEXT_CASE(INST_SET_GLOBAL_ADD)    GLOBAL_MATH_SHARED(+)
@@ -1120,21 +1138,47 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
             Value v2 = STACK_POP(1, 0);\
             uint16_t id = PROG_IDX(1);\
             Value v1 = *(*frame)->caps[id];\
-            assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
+            assert2(-1, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
             *(*frame)->caps[id] = val_float(v1.u.f X v2.u.f);
-        
-        #define BIN_STACKPOP(IDX)\
-            Value v1 = STACK_POP(IDX, 0);\
-            Value v2 = STACK_POP(IDX, 1);
         
         NEXT_CASE(INST_SET_CAP_ADD)    CAP_MATH_SHARED(+)
         NEXT_CASE(INST_SET_CAP_SUB)    CAP_MATH_SHARED(-)
         NEXT_CASE(INST_SET_CAP_MUL)    CAP_MATH_SHARED(*)
         NEXT_CASE(INST_SET_CAP_DIV)    CAP_MATH_SHARED(/)
         
+        #define LOCAL_MATH_SHARED(X)\
+            Value v2 = STACK_POP(2, 0);\
+            uint16_t id = PROG_IDX(1);\
+            Value v1 = (*frame)->vars[id];\
+            assert2(-1, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
+            (*frame)->vars[id] = val_float(v1.u.f X v2.u.f);
+        
+        NEXT_CASE(INST_SET_ADD)    LOCAL_MATH_SHARED(+)
+        NEXT_CASE(INST_SET_SUB)    LOCAL_MATH_SHARED(-)
+        NEXT_CASE(INST_SET_MUL)    LOCAL_MATH_SHARED(*)
+        NEXT_CASE(INST_SET_DIV)    LOCAL_MATH_SHARED(/)
+            
+        #define ADDR_MATH_SHARED(X)\
+            Value v2 = STACK_POP(1, 0);\
+            Value * v1p = (*frame)->set_tgt_agg;\
+            assert2(-1, v1p && v2.tag == VALUE_FLOAT && v1p->tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
+            (*frame)->set_tgt_agg = 0;\
+            *v1p = val_float(v1p->u.f X v2.u.f);
+        
+        NEXT_CASE(INST_SET_LOC_ADD)    ADDR_MATH_SHARED(+)
+        NEXT_CASE(INST_SET_LOC_SUB)    ADDR_MATH_SHARED(-)
+        NEXT_CASE(INST_SET_LOC_MUL)    ADDR_MATH_SHARED(*)
+        NEXT_CASE(INST_SET_LOC_DIV)    ADDR_MATH_SHARED(/)
+        
+        #define BIN_STACKPOP(IDX)\
+            Value v1 = STACK_POP(IDX, 0);\
+            Value v2 = STACK_POP(IDX, 1);
+        
         #define MATH_SHARED(X) BIN_STACKPOP(1)\
-            assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
-            (*frame)->stack[PROG_IDX(1)] = val_float(v1.u.f X v2.u.f);
+            /*assert2(-1, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");*/\
+            if (v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT)\
+                (*frame)->stack[PROG_IDX(1)] = val_float(v1.u.f X v2.u.f);\
+            else (*frame)->stack[PROG_IDX(1)] = val_float(0.0);
         
         NEXT_CASE(INST_ADD)    MATH_SHARED(+)
         NEXT_CASE(INST_SUB)    MATH_SHARED(-)
@@ -1142,7 +1186,7 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
         NEXT_CASE(INST_DIV)    MATH_SHARED(/)
         
         #define MATH_SHARED_BOOL(X) BIN_STACKPOP(1)\
-            assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Boolean comparison only works on numbers");\
+            assert2(-1, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Boolean comparison only works on numbers");\
             (*frame)->stack[PROG_IDX(1)] = val_float(X);
         
         NEXT_CASE(INST_CMP_AND)    MATH_SHARED_BOOL(!!(v1.u.f) && !!(v2.u.f))
@@ -1159,22 +1203,27 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
         NEXT_CASE(INST_CMP_LT)    EQ_SHARED(equality == 1)
         NEXT_CASE(INST_CMP_GT)    EQ_SHARED(equality == -1)
         
+        NEXT_CASE(INST_SET_LOC)
+            Value v2 = STACK_POP(1, 0);
+            if ((*frame)->set_tgt_agg) { *(*frame)->set_tgt_agg = v2; (*frame)->set_tgt_agg = 0; }
+            else { assert2(-1, (*frame)->set_tgt_char && v2.tag == VALUE_STRING, "Invalid assignment.");
+                *(*frame)->set_tgt_char = **v2.u.s; (*frame)->set_tgt_char = 0; }
+        
         NEXT_CASE(INST_FORSTART)
             Value v = STACK_POP(5, 0);
-            assert2(0, v.tag == VALUE_FLOAT, "For loops can only operate on numbers");
+            assert2(-1, v.tag == VALUE_FLOAT, "For loops can only operate on numbers");
             uint16_t id = PROG_IDX(1);
             uint16_t idx = PROG_IDX(2);
-            (*frame)->forloops[idx] = v.u.f;
-            double temp = v.u.f;
-            assert2(0, temp - 1.0 != temp, "For loop value is too large and will never terminate");
+            (*frame)->forloops[idx].l = 0;
+            (*frame)->forloops[idx].r = v.u.f;
             (*frame)->vars[id] = val_float(0.0);
-            if (temp < 1.0) READ_AND_GOTO_TARGET(3)
+            if ((*frame)->forloops[idx].r < 1) READ_AND_GOTO_TARGET(3)
         NEXT_CASE(INST_FOREND)
             uint16_t id = PROG_IDX(1);
-            assert2(0, (*frame)->vars[id].tag == VALUE_FLOAT, "For loops can only handle numbers");
             uint16_t idx = PROG_IDX(2);
-            (*frame)->vars[id].u.f += 1.0;
-            if ((*frame)->vars[id].u.f < (*frame)->forloops[idx]) READ_AND_GOTO_TARGET(3)
+            (*frame)->forloops[idx].l += 1;
+            (*frame)->vars[id].u.f = (*frame)->forloops[idx].l;
+            if ((*frame)->forloops[idx].l < (*frame)->forloops[idx].r) READ_AND_GOTO_TARGET(3)
         
         NEXT_CASE(INST_JMP)    READ_AND_GOTO_TARGET(1)
         NEXT_CASE(INST_JMP_IF_FALSE)
@@ -1194,42 +1243,12 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
             Value * v = &(*frame)->vars[PROG_IDX(1)];
             if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; }
         
-        #define LOCAL_MATH_SHARED(X)\
-            Value v2 = STACK_POP(2, 0);\
-            uint16_t id = PROG_IDX(1);\
-            Value v1 = (*frame)->vars[id];\
-            assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
-            (*frame)->vars[id] = val_float(v1.u.f X v2.u.f);
-        
-        NEXT_CASE(INST_SET_ADD)    LOCAL_MATH_SHARED(+)
-        NEXT_CASE(INST_SET_SUB)    LOCAL_MATH_SHARED(-)
-        NEXT_CASE(INST_SET_MUL)    LOCAL_MATH_SHARED(*)
-        NEXT_CASE(INST_SET_DIV)    LOCAL_MATH_SHARED(/)
-            
-        NEXT_CASE(INST_SET_LOC)
-            Value v2 = STACK_POP(1, 0);
-            if ((*frame)->set_tgt_agg) { *(*frame)->set_tgt_agg = v2; (*frame)->set_tgt_agg = 0; }
-            else { assert2(0, (*frame)->set_tgt_char && v2.tag == VALUE_STRING, "Invalid assignment.");
-                *(*frame)->set_tgt_char = **v2.u.s; (*frame)->set_tgt_char = 0; }
-        
-        #define ADDR_MATH_SHARED(X)\
-            Value v2 = STACK_POP(1, 0);\
-            Value * v1p = (*frame)->set_tgt_agg;\
-            assert2(0, v1p && v2.tag == VALUE_FLOAT && v1p->tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
-            (*frame)->set_tgt_agg = 0;\
-            *v1p = val_float(v1p->u.f X v2.u.f);
-        
-        NEXT_CASE(INST_SET_LOC_ADD)    ADDR_MATH_SHARED(+)
-        NEXT_CASE(INST_SET_LOC_SUB)    ADDR_MATH_SHARED(-)
-        NEXT_CASE(INST_SET_LOC_MUL)    ADDR_MATH_SHARED(*)
-        NEXT_CASE(INST_SET_LOC_DIV)    ADDR_MATH_SHARED(/)
-        
         #define INDEX_SHARED(STR_VALID_OP) BIN_STACKPOP(1)\
-            assert2(0, v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY || v1.tag == VALUE_DICT);\
-            if (v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY) assert2(0, v2.tag == VALUE_FLOAT);\
-            if (v1.tag == VALUE_DICT) assert2(0, v2.tag == VALUE_FLOAT || v2.tag == VALUE_STRING\
+            assert2(-1, v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY || v1.tag == VALUE_DICT);\
+            if (v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY) assert2(-1, v2.tag == VALUE_FLOAT);\
+            if (v1.tag == VALUE_DICT) assert2(-1, v2.tag == VALUE_FLOAT || v2.tag == VALUE_STRING\
                                              || v2.tag == VALUE_FUNC || v2.tag == VALUE_NULL);\
-            if (v1.tag == VALUE_STRING) assert2(0, ((size_t)v2.u.f) STR_VALID_OP strlen(*v1.u.s));
+            if (v1.tag == VALUE_STRING) assert2(-1, ((size_t)v2.u.f) STR_VALID_OP strlen(*v1.u.s));
     
         NEXT_CASE(INST_INDEX)    INDEX_SHARED(<=)
             if (v1.tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *));
@@ -1241,7 +1260,7 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
         NEXT_CASE(INST_INDEX_LOC)    INDEX_SHARED(<)
             // Our strings are double-boxed so that we can COW them without the compiler needing to be aware of
             //  whether a string value is going to be used as a "place"/"lvalue" or not.
-            if (v1.tag == VALUE_STRING) { assert2(0, (size_t)v2.u.f <= strlen(*v1.u.s), "Index past end of string");
+            if (v1.tag == VALUE_STRING) { assert2(-1, (size_t)v2.u.f <= strlen(*v1.u.s), "Index past end of string");
                 *v1.u.s = stringdupn(*v1.u.s, strlen(*v1.u.s) + 1); (*frame)->set_tgt_char = *v1.u.s + (size_t)v2.u.f; }
             if (v1.tag == VALUE_ARRAY)  (*frame)->set_tgt_agg = array_get(v1.u.a, v2.u.f);
             if (v1.tag == VALUE_DICT)   (*frame)->set_tgt_agg = &(dict_get_or_insert(v1.u.d, v2)->r);
@@ -1363,8 +1382,8 @@ void filli_aot(void)
         for (size_t k = 0; k <= (global_prog->code[j] >> 8); k++)
             printf("    prog.code[%zu] = %u;\n", k, global_prog->code[j+k]);
         printf("    size_t dest = %s(&prog, &frame, global_frame);\n", ops[global_prog->code[j] & 0xFF]);
-        printf("    (void)dest;\n");
-        puts("prog.code = 0;");
+        puts("    if (dest == (size_t)-1) return 0;");
+        puts("    prog.code = 0;");
         if (global_prog->code[j] == INST_FOREND
             || global_prog->code[j] == INST_LAMBDA
             || global_prog->code[j] == INST_FORSTART)
@@ -1385,9 +1404,10 @@ void filli_aot(void)
                  global_prog->code[j] == INST_YIELD ||
                  global_prog->code[j] == INST_RETURN_VAL ||
                  global_prog->code[j] == INST_RETURN_VOID)
-            printf("    if (dest == (size_t)-1) return 0; if (dest > 0) { assert(labels[dest]); goto *labels[dest]; }\n");
+            printf("    if (dest > 0) { assert(labels[dest]); assert(*labels[dest]); goto *labels[dest]; }\n");
         j += global_prog->code[j] >> 8;
         
+        printf("frame->pc = 0;\n");
         printf("}\n");
     }
     
