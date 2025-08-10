@@ -38,11 +38,11 @@
 
 const char * filli_err = 0;
 //#define assert2(N, X, ...) { if (!(X)) { if (__VA_OPT__(1)+0) filli_err = #__VA_ARGS__; else filli_err = #X; return N; } }
-//#define assert2(N, X, ...) assert(X, __VA_ARGS__)
-#define assert2(N, X, ...) { (void)(X); }
+#define assert2(N, X, ...) assert(X, __VA_ARGS__)
+//#define assert2(N, X, ...) { (void)(X); }
 //#define panic2(N, X) { filli_err = #X; return N; }
-//#define panic2(N, X) panic(X)
-#define panic2(N, X) {}
+#define panic2(N, X) panic(X)
+//#define panic2(N, X) {}
 //#define repanic(N) { if (filli_err) return -1; }
 #define repanic(N) { }
 
@@ -718,6 +718,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         size_t r = compile_expr(source, tokens, count, ++i, 0);
         if (r == 0) prog_write3(PUSH_NULL, INST_YIELD, COMP_SPOP);
         else        prog_write2(INST_YIELD, COMP_SPOP);
+        global_prog->is_jumptarget[global_prog->i] = 3;
         return r + 1;
     }
     else
@@ -1038,7 +1039,7 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
                     (*frame)->vars[i] = prev->stack[idx + i]; Value * v = &(*frame)->vars[i];\
                     if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; } }\
                 if (!(FORCED)) { next_pc = fn->loc; if (fn->cap_data) (*frame)->caps = fn->cap_data; }\
-                else           { panic("AOT not yet supported for generators"); }\
+                else           { next_pc = (*frame)->pc; }\
                 DISPATCH_IMMEDIATELY(); }\
             handle_intrinsic_func(fn->id, argcount, *frame, idx, return_slot); // intrinsics
         
@@ -1062,12 +1063,14 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
         NEXT_CASE(INST_YIELD)
             if (!(*frame)->return_to) panic2(0, "Attempted to yield from not inside of a function");
             
+            next_pc = (*frame)->pc;
             PC_INC();
             
             Value v = STACK_POP(1, 0);
             Value v2 = val_array(2);
             v2.u.a->buf[0] = v;
             v2.u.a->buf[1] = val_funcstate((*frame)->fn, *frame);
+            (*frame)->pc = next_pc;
             
             RETURN_WITH(v2);
         
@@ -1352,6 +1355,7 @@ void filli_aot(void)
         printf("{\n");
         puts("uint16_t code[10];");
         puts("Program prog;");
+        printf("frame->pc = %zu;\n", j);
         printf("prog.i = 0;\n");
         printf("prog.real_pc = %zu;\n", j);
         printf("prog.capacity = 10;\n");
@@ -1361,17 +1365,17 @@ void filli_aot(void)
         printf("    size_t dest = %s(&prog, &frame, global_frame);\n", ops[global_prog->code[j] & 0xFF]);
         printf("    (void)dest;\n");
         puts("prog.code = 0;");
-        if (global_prog->code[j] == INST_FOREND)
+        if (global_prog->code[j] == INST_FOREND
+            || global_prog->code[j] == INST_LAMBDA
+            || global_prog->code[j] == INST_FORSTART)
         {
             uint32_t target = fi_mem_read_u32(global_prog->code + j + 3);
             printf("    if (dest > 0) { goto _ADDR_%u; }\n", target);
         }
-        else if (global_prog->code[j] == INST_FORSTART)
-        {
-            uint32_t target = fi_mem_read_u32(global_prog->code + j + 3);
-            printf("    if (dest > 0) { goto _ADDR_%u; }\n", target);
-        }
-        else if (global_prog->code[j] == INST_FUNCDEF)
+        else if (global_prog->code[j] == INST_FUNCDEF
+                 || global_prog->code[j] == INST_JMP
+                 || global_prog->code[j] == INST_JMP_IF_FALSE
+                 || global_prog->code[j] == INST_JMP_IF_TRUE)
         {
             uint32_t target = fi_mem_read_u32(global_prog->code + j + 1);
             printf("    goto _ADDR_%u;\n", target);
@@ -1380,14 +1384,8 @@ void filli_aot(void)
                  global_prog->code[j] == INST_FUNCCALL_REF ||
                  global_prog->code[j] == INST_YIELD ||
                  global_prog->code[j] == INST_RETURN_VAL ||
-                 global_prog->code[j] == INST_RETURN_VOID ||
-                 global_prog->code[j] == INST_FORSTART ||
-                 global_prog->code[j] == INST_FOREND ||
-                 global_prog->code[j] == INST_JMP ||
-                 global_prog->code[j] == INST_JMP_IF_FALSE ||
-                 global_prog->code[j] == INST_JMP_IF_TRUE ||
-                 global_prog->code[j] == INST_LAMBDA)
-            printf("    if (dest == (size_t)-1) return 0; if (dest > 0) goto *labels[dest];\n");
+                 global_prog->code[j] == INST_RETURN_VOID)
+            printf("    if (dest == (size_t)-1) return 0; if (dest > 0) { assert(labels[dest]); goto *labels[dest]; }\n");
         j += global_prog->code[j] >> 8;
         
         printf("}\n");
