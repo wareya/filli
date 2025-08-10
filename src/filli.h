@@ -23,8 +23,8 @@
 #define USE_TAIL_DISPATCH 1
 
 #define IDENTIFIER_COUNT 32000 // max number of uniquely-spelled identifiers per program
-#define FRAME_VARCOUNT 1024 // increases memory usage of stack frames
-#define FRAME_STACKSIZE 1024 // increases memory usage of stack frames
+#define FRAME_VARCOUNT 128 // increases memory usage of stack frames
+#define FRAME_STACKSIZE 128 // increases memory usage of stack frames
 #define PROGRAM_MAXLEN 100000 // default max length of program
 #define FORLOOP_COUNT_LIMIT 255 // increases memory usage of stack frames
 #define ARGLIMIT 255 // affects risk of stack smashing during compilation
@@ -38,11 +38,11 @@
 
 const char * filli_err = 0;
 //#define assert2(N, X, ...) { if (!(X)) { if (__VA_OPT__(1)+0) filli_err = #__VA_ARGS__; else filli_err = #X; return N; } }
-#define assert2(N, X, ...) assert(X, __VA_ARGS__)
-//#define assert2(N, X, ...) { (void)(X); }
+//#define assert2(N, X, ...) assert(X, __VA_ARGS__)
+#define assert2(N, X, ...) { (void)(X); }
 //#define panic2(N, X) { filli_err = #X; return N; }
-#define panic2(N, X) panic(X)
-//#define panic2(N, X) {}
+//#define panic2(N, X) panic(X)
+#define panic2(N, X) {}
 //#define repanic(N) { if (filli_err) return -1; }
 #define repanic(N) { }
 
@@ -443,7 +443,7 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
         for (size_t i = 0; i < j; i++) COMP_SPOP;
         COMP_SPOP;
         prog_write3(INST_FUNCCALL_REF, j, COMP_SPUSH);
-        global_prog->is_jumptarget[global_prog->i] = 1;
+        global_prog->is_jumptarget[global_prog->i] |= 2; // 2 or 3 - dynamic. 1 - static.
         
         return i - orig_i;
     }
@@ -492,7 +492,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         
         uint32_t end = global_prog->i + ((tokens[i].kind == -3 || tokens[i].kind == -2) ? 3 : 0);
         memcpy(global_prog->code + jump_at, &end, 4);
-        global_prog->is_jumptarget[end] = 1;
+        global_prog->is_jumptarget[end] |= 1;
         
         uint32_t skips[ELIFLIMIT] = {};
         size_t skip_i = 0;
@@ -515,7 +515,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
                 
                 uint32_t end = global_prog->i + ((tokens[i].kind == -3 || tokens[i].kind == -2) ? 3 : 0);
                 memcpy(global_prog->code + jump_at, &end, 4);
-                global_prog->is_jumptarget[end] = 1;
+                global_prog->is_jumptarget[end] |= 1;
             }
             else
             {
@@ -526,8 +526,10 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         assert2(0, tokens[i].kind == -11, "Expected 'end'");
         uint32_t real_end = global_prog->i;
         while (skip_i > 0)
+        {
             memcpy(global_prog->code + skips[--skip_i], &real_end, 4);
-        global_prog->is_jumptarget[real_end] = 1;
+            global_prog->is_jumptarget[real_end] |= 1;
+        }
         return i + 1 - orig_i;
     }
     if (tokens[i].kind == -5) // while
@@ -550,19 +552,23 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         compile_expr(source, tokens, count, expr_i, 0); // recompile test expr
         prog_write4(INST_JMP_IF_TRUE, 0, 0, COMP_SPOP);
         memcpy(global_prog->code + (global_prog->i - 3), &loop_at, 4);
-        global_prog->is_jumptarget[loop_at] = 1;
+        global_prog->is_jumptarget[loop_at] |= 1;
         
         uint32_t end = global_prog->i;
         memcpy(global_prog->code + skip_at, &end, 4);
-        global_prog->is_jumptarget[end] = 1;
+        global_prog->is_jumptarget[end] |= 1;
         
         uint32_t break_to = global_prog->i;
         while (cs->loop_break_i > loop_break_base)
+        {
             memcpy(global_prog->code + cs->loop_breaks[--cs->loop_break_i], &break_to, 4);
-        while (cs->loop_cont_i  > loop_cont_base )
+            global_prog->is_jumptarget[break_to] |= 1;
+        }
+        while (cs->loop_cont_i  > loop_cont_base)
+        {
             memcpy(global_prog->code + cs->loop_conts [--cs->loop_cont_i ], &cont_to , 4);
-        global_prog->is_jumptarget[break_to] = 1;
-        global_prog->is_jumptarget[cont_to] = 1;
+            global_prog->is_jumptarget[cont_to] |= 1;
+        }
         cs->loop_nesting--;
         
         return i + 1- orig_i;
@@ -617,19 +623,23 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         uint32_t cont_to = global_prog->i;
         prog_write5(INST_FOREND, (cs->func_depth == 0) ? cs->globals_n - 1 : cs->locals_n - 1, idx, 0, 0);
         memcpy(global_prog->code + (global_prog->i - 2), &head, 4);
-        global_prog->is_jumptarget[head] = 1;
+        global_prog->is_jumptarget[head] |= 1;
         
         uint32_t end = global_prog->i;
         memcpy(global_prog->code + (head - 3), &end, 4);
-        global_prog->is_jumptarget[end] = 1;
+        global_prog->is_jumptarget[end] |= 1;
         
         uint32_t break_to = global_prog->i;
         while (cs->loop_break_i > loop_break_base)
+        {
             memcpy(global_prog->code + cs->loop_breaks[--cs->loop_break_i], &break_to, 4);
-        while (cs->loop_cont_i  > loop_cont_base )
+            global_prog->is_jumptarget[break_to] |= 1;
+        }
+        while (cs->loop_cont_i  > loop_cont_base)
+        {
             memcpy(global_prog->code + cs->loop_conts [--cs->loop_cont_i ], &cont_to , 4);
-        global_prog->is_jumptarget[break_to] = 1;
-        global_prog->is_jumptarget[cont_to] = 1;
+            global_prog->is_jumptarget[cont_to] |= 1;
+        }
         cs->loop_nesting--;
         
         return i - orig_i;
@@ -678,7 +688,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         
         for (size_t i = 0; i < j; i++) (void)COMP_SPOP;
         prog_write4(INST_FUNCCALL, id, j, COMP_S);
-        global_prog->is_jumptarget[global_prog->i] = 1;
+        global_prog->is_jumptarget[global_prog->i] |= 2;
         
         return i - orig_i;
     }
@@ -779,7 +789,7 @@ size_t compile_register_func(const char * source, Token * tokens, size_t count, 
         memcpy(cs->funcs_reg[id].args, args, j * sizeof(uint16_t));
     }
     
-    global_prog->is_jumptarget[global_prog->i] = 1;
+    global_prog->is_jumptarget[global_prog->i] = 3;
     
     i += compile_statementlist(source, tokens, count, i);
     prog_write(INST_RETURN_VOID);
@@ -802,7 +812,7 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
     i += compile_register_func(source, tokens, count, id, i);
     
     memcpy(global_prog->code + len_offs, &global_prog->i, 4);
-    global_prog->is_jumptarget[global_prog->i] = 1;
+    global_prog->is_jumptarget[global_prog->i] |= 1;
     
     return i - orig_i;
 }
@@ -822,7 +832,7 @@ size_t compile_lambda(const char * source, Token * tokens, size_t count, size_t 
     cs->funcs_reg[id].cap_count = caps_count;
     
     memcpy(global_prog->code + id_offs + 2, &global_prog->i, 4);
-    global_prog->is_jumptarget[global_prog->i] = 1;
+    global_prog->is_jumptarget[global_prog->i] |= 1;
     
     return i - orig_i;
 }
@@ -990,12 +1000,12 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
     #define PC_INC() next_pc += op >> 8;
     #define MARK_CASE(X) size_t _handler_##X(Program * prog, Frame ** frame, Frame * global_frame) { uint16_t op = X; repanic(-1);\
         size_t next_pc = 0; (void)global_frame; (void)frame; (void)next_pc; (void)prog;\
-        Value _empty_value = {};
+        Value _empty_value = {}; (void)_empty_value;
 
     #define END_CASE() PC_INC(); return 0; }
     #define DISPATCH_IMMEDIATELY() return next_pc + 1;
     
-    #define STACK_POP(N, M) (*frame)->stack[PROG_IDX(N)+(M)];// (*frame)->stack[PROG_IDX(N)+(M)] = _empty_value;
+    #define STACK_POP(N, M) (*frame)->stack[PROG_IDX(N)+(M)]; (*frame)->stack[PROG_IDX(N)+(M)] = _empty_value;
     
     #define NEXT_CASE(X) END_CASE() MARK_CASE(X)
 
@@ -1020,7 +1030,6 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
                 Frame * next = (FORCED) ? (FORCED) : (Frame *)zalloc(sizeof(Frame));\
                 next->fn = fn;\
                 next->return_to = *frame;\
-                printf("setting up return to %u (via %u)\n", prog->real_pc + (op >> 8), prog->real_pc);\
                 next->return_pc = prog->real_pc + (op >> 8);\
                 (*frame)->return_slot = return_slot;\
                 *frame = next;\
@@ -1046,7 +1055,7 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
             ENTER_FUNC(PROG_IDX(2) + 1, PROG_IDX(2), v_func.tag == VALUE_FUNC ? 0 : v_func.u.fs->frame)
         
         #define RETURN_WITH(X) if (!(*frame)->return_to) return -1; \
-            next_pc = (*frame)->return_pc; printf("--returning to %zu\n", next_pc); \
+            next_pc = (*frame)->return_pc; \
             Value retval = (X); *frame = (*frame)->return_to; (*frame)->stack[(*frame)->return_slot] = retval; \
             DISPATCH_IMMEDIATELY();
         
@@ -1268,7 +1277,7 @@ void filli_aot(void)
     puts("#include \"filli.h\"");
     puts("");
     
-    puts("int main(void) {");
+    puts("int main(void) { {");
     printf("void ** labels[%u] = {};\n", global_prog->i + 1);
     puts("Frame * frame;");
     puts("Frame * global_frame;");
@@ -1323,7 +1332,7 @@ void filli_aot(void)
     
     for (size_t j = 0; j < global_prog->i;)
     {
-        if (global_prog->is_jumptarget[j])
+        if (global_prog->is_jumptarget[j] > 1)
             printf("labels[%zu] = &&_ADDR_%zu;\n", j+1, j);
         assert(global_prog->code[j] >> 8);
         j += global_prog->code[j] >> 8;
@@ -1362,8 +1371,12 @@ void filli_aot(void)
             uint32_t target = fi_mem_read_u32(global_prog->code + j + 3);
             printf("    if (dest > 0) { goto _ADDR_%u; }\n", target);
         }
-        else if (global_prog->code[j] == INST_FUNCDEF ||
-                 global_prog->code[j] == INST_FUNCCALL ||
+        else if (global_prog->code[j] == INST_FUNCDEF)
+        {
+            uint32_t target = fi_mem_read_u32(global_prog->code + j + 1);
+            printf("    goto _ADDR_%u;\n", target);
+        }
+        else if (global_prog->code[j] == INST_FUNCCALL ||
                  global_prog->code[j] == INST_FUNCCALL_REF ||
                  global_prog->code[j] == INST_YIELD ||
                  global_prog->code[j] == INST_RETURN_VAL ||
@@ -1380,8 +1393,7 @@ void filli_aot(void)
         printf("}\n");
     }
     
-    puts("free(frame);");
-    puts("}");
+    puts("} }");
 }
 
 #endif

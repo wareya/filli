@@ -11,4 +11,3 @@ end
 
 let sum = calc(100000000)
 print(sum * 4)
-print("Done!")
