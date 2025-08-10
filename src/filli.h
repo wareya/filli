@@ -1352,13 +1352,16 @@ void filli_aot(void)
     puts("global_frame = frame;");
     puts("frame->pc = 0;");
     puts("");
-    puts("____dummy____:{};");
-    puts("(void)&&____dummy____;");
+    
+    uint8_t dyn_jumptarget_exists = 0;
     
     for (size_t j = 0; j < global_prog->i;)
     {
         if (global_prog->is_jumptarget[j] > 1)
+        {
             printf("labels[%zu] = &&_ADDR_%zu;\n", j+1, j);
+            dyn_jumptarget_exists = 1;
+        }
         assert(global_prog->code[j] >> 8);
         j += global_prog->code[j] >> 8;
     }
@@ -1395,19 +1398,26 @@ void filli_aot(void)
             printf("    if (dest > 0) { goto _ADDR_%u; }\n", target);
         }
         else if (global_prog->code[j] == INST_FUNCDEF
-                 || global_prog->code[j] == INST_JMP
-                 || global_prog->code[j] == INST_JMP_IF_FALSE
-                 || global_prog->code[j] == INST_JMP_IF_TRUE)
+                 || global_prog->code[j] == INST_JMP)
         {
             uint32_t target = fi_mem_read_u32(global_prog->code + j + 1);
             printf("    goto _ADDR_%u;\n", target);
+        }
+        else if (global_prog->code[j] == INST_JMP_IF_FALSE
+                 || global_prog->code[j] == INST_JMP_IF_TRUE)
+        {
+            uint32_t target = fi_mem_read_u32(global_prog->code + j + 1);
+            printf("    if (dest > 0) { goto _ADDR_%u; }\n", target);
         }
         else if (global_prog->code[j] == INST_FUNCCALL ||
                  global_prog->code[j] == INST_FUNCCALL_REF ||
                  global_prog->code[j] == INST_YIELD ||
                  global_prog->code[j] == INST_RETURN_VAL ||
                  global_prog->code[j] == INST_RETURN_VOID)
-            printf("    if (dest > 0) { assert(labels[dest]); assert(*labels[dest]); goto *labels[dest]; }\n");
+        {
+            if (dyn_jumptarget_exists)
+                printf("    if (dest > 0) { assert(labels[dest]); assert(*labels[dest]); goto *labels[dest]; }\n");
+        }
         j += global_prog->code[j] >> 8;
         
         printf("frame->pc = 0;\n");
