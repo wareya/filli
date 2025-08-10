@@ -979,7 +979,7 @@ uint8_t val_truthy(Value v)
     return 0;
 }
 
-typedef struct _LoopPair { uint32_t l; uint32_t r; } LoopPair;
+typedef struct _LoopPair { uint64_t l; uint64_t r; } LoopPair;
 
 typedef struct _Frame {
     Value stack[FRAME_STACKSIZE], vars[FRAME_VARCOUNT];
