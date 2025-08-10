@@ -23,8 +23,8 @@
 #define USE_TAIL_DISPATCH 1
 
 #define IDENTIFIER_COUNT 32000 // max number of uniquely-spelled identifiers per program
-#define FRAME_VARCOUNT 128 // increases memory usage of stack frames
-#define FRAME_STACKSIZE 128 // increases memory usage of stack frames
+#define FRAME_VARCOUNT 1024 // increases memory usage of stack frames
+#define FRAME_STACKSIZE 1024 // increases memory usage of stack frames. needs to be a multiple of 64
 #define PROGRAM_MAXLEN 100000 // default max length of program
 #define FORLOOP_COUNT_LIMIT 255 // increases memory usage of stack frames
 #define ARGLIMIT 255 // affects risk of stack smashing during compilation
@@ -982,16 +982,17 @@ uint8_t val_truthy(Value v)
 typedef struct _LoopPair { uint32_t l; uint32_t r; } LoopPair;
 
 typedef struct _Frame {
+    Value stack[FRAME_STACKSIZE], vars[FRAME_VARCOUNT];
+    LoopPair forloops[FORLOOP_COUNT_LIMIT];
     uint32_t pc;
     uint32_t return_slot;
     uint32_t return_pc;
     struct _Frame * return_to;
     Value * set_tgt_agg;
     char * set_tgt_char;
-    Value stack[FRAME_STACKSIZE], vars[FRAME_VARCOUNT];
-    LoopPair forloops[FORLOOP_COUNT_LIMIT];
     Value ** caps;
     Funcdef * fn;
+    void * _unused;
 } Frame;
 
 void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame, size_t stackpos, size_t return_slot);

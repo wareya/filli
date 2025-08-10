@@ -1,4 +1,4 @@
-local n = 100000000
+local n = tonumber(arg[1])
 local sum = 0
 local flip = -1
 
