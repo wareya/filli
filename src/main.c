@@ -67,12 +67,14 @@ int main(int argc, char ** argv)
         fputs("\n", stdout);
         return 0;
     }
-
+    
+    /*
     for (size_t i = 0; i < prog.i; i++)
     {
         printu16hex(prog.code[i]);
         prints("\n");
     }
+    */
     
     interpret(0);
     

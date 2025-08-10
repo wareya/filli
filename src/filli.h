@@ -37,10 +37,10 @@
 #include "microlib.h"
 
 const char * filli_err = 0;
-//#define assert2(N, X, ...) { if (!(X)) { if (__VA_OPT__(1)+0) filli_err = #__VA_ARGS__; else filli_err = #X; return N; } }
-#define assert2(N, X, ...) assert(X, __VA_ARGS__)
-//#define panic2(N, X) { filli_err = #X; return N; }
-#define panic2(N, X) panic(X)
+#define assert2(N, X, ...) { if (!(X)) { if (__VA_OPT__(1)+0) filli_err = #__VA_ARGS__; else filli_err = #X; return N; } }
+//#define assert2(N, X, ...) assert(X, __VA_ARGS__)
+#define panic2(N, X) { filli_err = #X; return N; }
+//#define panic2(N, X) panic(X)
 #define repanic(N) { if (filli_err) return N; }
 
 void * zalloc(size_t s) { char * r = (char *)malloc(s); if (!r) panic("Out of memory"); memset(r, 0, s); return r; }
@@ -1068,7 +1068,7 @@ size_t interpret(size_t from_pc)
             Value retval = (X); frame = frame->return_to; frame->stack[frame->return_slot] = retval; DISPATCH_IMMEDIATELY();
         
         NEXT_CASE(INST_YIELD)
-            if (!frame->return_to) panic2(, "Attempted to yield from not inside of a function");
+            if (!frame->return_to) panic2(0, "Attempted to yield from not inside of a function");
             
             PC_INC();
             
