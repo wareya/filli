@@ -38,11 +38,11 @@
 
 const char * filli_err = 0;
 //#define assert2(N, X, ...) { if (!(X)) { if (__VA_OPT__(1)+0) filli_err = #__VA_ARGS__; else filli_err = #X; return N; } }
-#define assert2(N, X, ...) assert(X, __VA_ARGS__)
-//#define assert2(N, X, ...) { (void)(X); }
+//#define assert2(N, X, ...) assert(X, __VA_ARGS__)
+#define assert2(N, X, ...) { (void)(X); }
 //#define panic2(N, X) { filli_err = #X; return N; }
-#define panic2(N, X) panic(X)
-//#define panic2(N, X) {}
+//#define panic2(N, X) panic(X)
+#define panic2(N, X) {}
 //#define repanic(N) { if (filli_err) return -1; }
 #define repanic(N) { }
 
@@ -204,8 +204,8 @@ enum { INST_INVALID = 0x000,
 
 #define INST_XMACRO() INSTX(INST_INVALID) INSTX(PUSH_NULL) INSTX(PUSH_DICT_EMPTY) INSTX(INST_RETURN_VAL) INSTX(INST_RETURN_VOID) INSTX(INST_YIELD) INSTX(INST_ADD) INSTX(INST_SUB) INSTX(INST_MUL) INSTX(INST_DIV) INSTX(INST_CMP_AND) INSTX(INST_CMP_OR) INSTX(INST_SET_LOC) INSTX(INST_SET_LOC_ADD) INSTX(INST_SET_LOC_SUB) INSTX(INST_SET_LOC_MUL) INSTX(INST_SET_LOC_DIV) INSTX(INST_INDEX) INSTX(INST_INDEX_LOC) INSTX(INST_CMP_EQ) INSTX(INST_CMP_NE) INSTX(INST_CMP_GT) INSTX(INST_CMP_LT) INSTX(INST_CMP_GE) INSTX(INST_CMP_LE) INSTX(PUSH_FUNCNAME) INSTX(INST_FUNCCALL_REF) INSTX(PUSH_STRING) INSTX(INST_ARRAY_LITERAL) INSTX(PUSH_LOCAL) INSTX(PUSH_GLOBAL) INSTX(PUSH_CAP) INSTX(INST_SET) INSTX(INST_SET_GLOBAL) INSTX(INST_SET_CAP) INSTX(INST_SET_ADD) INSTX(INST_SET_GLOBAL_ADD) INSTX(INST_SET_CAP_ADD) INSTX(INST_SET_SUB) INSTX(INST_SET_GLOBAL_SUB) INSTX(INST_SET_CAP_SUB) INSTX(INST_SET_MUL) INSTX(INST_SET_GLOBAL_MUL) INSTX(INST_SET_CAP_MUL) INSTX(INST_SET_DIV) INSTX(INST_SET_GLOBAL_DIV) INSTX(INST_SET_CAP_DIV) INSTX(INST_JMP) INSTX(INST_JMP_IF_FALSE) INSTX(INST_JMP_IF_TRUE) INSTX(INST_FUNCDEF) INSTX(INST_FUNCCALL) INSTX(PUSH_NUM) INSTX(INST_FOREND) INSTX(INST_FORSTART) INSTX(INST_LAMBDA)
 
-typedef struct _Program { uint16_t * code; uint32_t capacity; uint32_t i; uint32_t real_pc; } Program;
-void init_program(Program * prog) { prog->capacity = PROGRAM_MAXLEN; prog->code = (uint16_t *)zalloc(sizeof(uint16_t) * prog->capacity); prog->i = 0; }
+typedef struct _Program { uint16_t * code; uint32_t capacity; uint32_t i; uint32_t real_pc; uint8_t * is_jumptarget; } Program;
+void init_program(Program * prog) { prog->capacity = PROGRAM_MAXLEN; prog->code = (uint16_t *)zalloc(sizeof(uint16_t) * prog->capacity); prog->is_jumptarget = (uint8_t *)zalloc(prog->capacity); prog->i = 0; }
 
 Program * global_prog;
 void prog_write(uint16_t a) { global_prog->code[global_prog->i++] = a; }
@@ -443,6 +443,8 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
         for (size_t i = 0; i < j; i++) COMP_SPOP;
         COMP_SPOP;
         prog_write3(INST_FUNCCALL_REF, j, COMP_SPUSH);
+        global_prog->is_jumptarget[global_prog->i] = 1;
+        
         return i - orig_i;
     }
     
@@ -490,6 +492,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         
         uint32_t end = global_prog->i + ((tokens[i].kind == -3 || tokens[i].kind == -2) ? 3 : 0);
         memcpy(global_prog->code + jump_at, &end, 4);
+        global_prog->is_jumptarget[end] = 1;
         
         uint32_t skips[ELIFLIMIT] = {};
         size_t skip_i = 0;
@@ -512,6 +515,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
                 
                 uint32_t end = global_prog->i + ((tokens[i].kind == -3 || tokens[i].kind == -2) ? 3 : 0);
                 memcpy(global_prog->code + jump_at, &end, 4);
+                global_prog->is_jumptarget[end] = 1;
             }
             else
             {
@@ -521,7 +525,9 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         }
         assert2(0, tokens[i].kind == -11, "Expected 'end'");
         uint32_t real_end = global_prog->i;
-        while (skip_i > 0) memcpy(global_prog->code + skips[--skip_i], &real_end, 4);
+        while (skip_i > 0)
+            memcpy(global_prog->code + skips[--skip_i], &real_end, 4);
+        global_prog->is_jumptarget[real_end] = 1;
         return i + 1 - orig_i;
     }
     if (tokens[i].kind == -5) // while
@@ -544,15 +550,19 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         compile_expr(source, tokens, count, expr_i, 0); // recompile test expr
         prog_write4(INST_JMP_IF_TRUE, 0, 0, COMP_SPOP);
         memcpy(global_prog->code + (global_prog->i - 3), &loop_at, 4);
+        global_prog->is_jumptarget[loop_at] = 1;
         
         uint32_t end = global_prog->i;
         memcpy(global_prog->code + skip_at, &end, 4);
+        global_prog->is_jumptarget[end] = 1;
         
         uint32_t break_to = global_prog->i;
         while (cs->loop_break_i > loop_break_base)
             memcpy(global_prog->code + cs->loop_breaks[--cs->loop_break_i], &break_to, 4);
         while (cs->loop_cont_i  > loop_cont_base )
             memcpy(global_prog->code + cs->loop_conts [--cs->loop_cont_i ], &cont_to , 4);
+        global_prog->is_jumptarget[break_to] = 1;
+        global_prog->is_jumptarget[cont_to] = 1;
         cs->loop_nesting--;
         
         return i + 1- orig_i;
@@ -607,15 +617,19 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         uint32_t cont_to = global_prog->i;
         prog_write5(INST_FOREND, (cs->func_depth == 0) ? cs->globals_n - 1 : cs->locals_n - 1, idx, 0, 0);
         memcpy(global_prog->code + (global_prog->i - 2), &head, 4);
+        global_prog->is_jumptarget[head] = 1;
         
         uint32_t end = global_prog->i;
         memcpy(global_prog->code + (head - 3), &end, 4);
+        global_prog->is_jumptarget[end] = 1;
         
         uint32_t break_to = global_prog->i;
         while (cs->loop_break_i > loop_break_base)
             memcpy(global_prog->code + cs->loop_breaks[--cs->loop_break_i], &break_to, 4);
         while (cs->loop_cont_i  > loop_cont_base )
             memcpy(global_prog->code + cs->loop_conts [--cs->loop_cont_i ], &cont_to , 4);
+        global_prog->is_jumptarget[break_to] = 1;
+        global_prog->is_jumptarget[cont_to] = 1;
         cs->loop_nesting--;
         
         return i - orig_i;
@@ -664,6 +678,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         
         for (size_t i = 0; i < j; i++) (void)COMP_SPOP;
         prog_write4(INST_FUNCCALL, id, j, COMP_S);
+        global_prog->is_jumptarget[global_prog->i] = 1;
         
         return i - orig_i;
     }
@@ -764,6 +779,8 @@ size_t compile_register_func(const char * source, Token * tokens, size_t count, 
         memcpy(cs->funcs_reg[id].args, args, j * sizeof(uint16_t));
     }
     
+    global_prog->is_jumptarget[global_prog->i] = 1;
+    
     i += compile_statementlist(source, tokens, count, i);
     prog_write(INST_RETURN_VOID);
     assert2(0, tokens[i++].kind == -11, "Expected 'end'");
@@ -785,6 +802,7 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
     i += compile_register_func(source, tokens, count, id, i);
     
     memcpy(global_prog->code + len_offs, &global_prog->i, 4);
+    global_prog->is_jumptarget[global_prog->i] = 1;
     
     return i - orig_i;
 }
@@ -804,6 +822,7 @@ size_t compile_lambda(const char * source, Token * tokens, size_t count, size_t 
     cs->funcs_reg[id].cap_count = caps_count;
     
     memcpy(global_prog->code + id_offs + 2, &global_prog->i, 4);
+    global_prog->is_jumptarget[global_prog->i] = 1;
     
     return i - orig_i;
 }
@@ -950,17 +969,17 @@ typedef struct _Frame {
     struct _Frame * return_to;
     Value * set_tgt_agg;
     char * set_tgt_char;
-    Value vars[FRAME_VARCOUNT], stack[FRAME_STACKSIZE];
+    Value stack[FRAME_STACKSIZE], vars[FRAME_VARCOUNT];
     double forloops[FORLOOP_COUNT_LIMIT];
     Value ** caps;
     Funcdef * fn;
 } Frame;
 
 void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame, size_t stackpos, size_t return_slot);
-#define INSTX(X) size_t _handler_##X(Program * prog, Frame ** frame, Frame ** global_frame);
+#define INSTX(X) size_t _handler_##X(Program * prog, Frame ** frame, Frame * global_frame);
 INST_XMACRO()
 #undef INSTX
-size_t (*ops[0x100])(Frame ** frame, Frame ** global_frame) = {};
+size_t (*ops[0x100])(Frame ** frame, Frame * global_frame) = {};
 
 uint32_t fi_mem_read_u32(void * from) { uint32_t n; memcpy(&n, from, 4); return n; }
 double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
@@ -969,14 +988,14 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
     #define CASES_END()
     
     #define PC_INC() next_pc += op >> 8;
-    #define MARK_CASE(X) size_t _handler_##X(Program * prog, Frame ** frame, Frame ** global_frame) { uint16_t op = X; repanic(-1);\
+    #define MARK_CASE(X) size_t _handler_##X(Program * prog, Frame ** frame, Frame * global_frame) { uint16_t op = X; repanic(-1);\
         size_t next_pc = 0; (void)global_frame; (void)frame; (void)next_pc; (void)prog;\
         Value _empty_value = {};
 
     #define END_CASE() PC_INC(); return 0; }
     #define DISPATCH_IMMEDIATELY() return next_pc + 1;
     
-    #define STACK_POP(N, M) (*frame)->stack[PROG_IDX(N)+(M)]; (*frame)->stack[PROG_IDX(N)+(M)] = _empty_value;
+    #define STACK_POP(N, M) (*frame)->stack[PROG_IDX(N)+(M)];// (*frame)->stack[PROG_IDX(N)+(M)] = _empty_value;
     
     #define NEXT_CASE(X) END_CASE() MARK_CASE(X)
 
@@ -1059,10 +1078,10 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
         
         NEXT_CASE(PUSH_NUM)
             STACK_PUSH(5, val_float(fi_mem_read_f64(prog->code + 1)))
-        NEXT_CASE(PUSH_GLOBAL)    STACK_PUSH(2, (*global_frame)->vars[PROG_IDX(1)])
+        NEXT_CASE(PUSH_GLOBAL)    STACK_PUSH(2, global_frame->vars[PROG_IDX(1)])
         NEXT_CASE(INST_SET_GLOBAL)
             Value v2 = STACK_POP(2, 0);
-            (*global_frame)->vars[PROG_IDX(1)] = v2;
+            global_frame->vars[PROG_IDX(1)] = v2;
             Value * v = &(*frame)->vars[PROG_IDX(1)];
             if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; }
         
@@ -1076,9 +1095,9 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
         #define GLOBAL_MATH_SHARED(X)\
             Value v2 = STACK_POP(1, 0);\
             uint16_t id = PROG_IDX(1);\
-            Value v1 = (*global_frame)->vars[id];\
+            Value v1 = global_frame->vars[id];\
             assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
-            (*global_frame)->vars[id] = val_float(v1.u.f X v2.u.f);
+            global_frame->vars[id] = val_float(v1.u.f X v2.u.f);
         
         NEXT_CASE(INST_SET_GLOBAL_ADD)    GLOBAL_MATH_SHARED(+)
         NEXT_CASE(INST_SET_GLOBAL_SUB)    GLOBAL_MATH_SHARED(-)
@@ -1240,10 +1259,12 @@ void register_intrinsic_func(const char * s)
 void filli_aot(void)
 {
     puts("#include <stdlib.h>");
-    puts("#include <gc.h>");
     puts("#include <assert.h>");
+    puts("#ifndef NO_GC");
+    puts("#include <gc.h>");
     puts("#define malloc(X) GC_MALLOC(X)");
     puts("#define free(X) GC_FREE(X)");
+    puts("#endif");
     puts("#include \"filli.h\"");
     puts("");
     
@@ -1302,8 +1323,8 @@ void filli_aot(void)
     
     for (size_t j = 0; j < global_prog->i;)
     {
-        printf("labels[%zu] = &&_ADDR_%zu;\n", j+1, j);
-        assert(global_prog->code[j] >> 8);
+        if (global_prog->is_jumptarget[j])
+            printf("labels[%zu] = &&_ADDR_%zu;\n", j+1, j);
         assert(global_prog->code[j] >> 8);
         j += global_prog->code[j] >> 8;
     }
@@ -1317,7 +1338,9 @@ void filli_aot(void)
     
     for (size_t j = 0; j < global_prog->i;)
     {
-        printf("_ADDR_%zu: {\n", j);
+        if (global_prog->is_jumptarget[j])
+            printf("_ADDR_%zu: ", j);
+        printf("{\n");
         puts("uint16_t code[10];");
         puts("Program prog;");
         printf("prog.i = 0;\n");
@@ -1326,7 +1349,7 @@ void filli_aot(void)
         puts("prog.code = code;");
         for (size_t k = 0; k <= (global_prog->code[j] >> 8); k++)
             printf("    prog.code[%zu] = %u;\n", k, global_prog->code[j+k]);
-        printf("    size_t dest = %s(&prog, &frame, &global_frame);\n", ops[global_prog->code[j] & 0xFF]);
+        printf("    size_t dest = %s(&prog, &frame, global_frame);\n", ops[global_prog->code[j] & 0xFF]);
         printf("    (void)dest;\n");
         puts("prog.code = 0;");
         if (global_prog->code[j] == INST_FOREND)
@@ -1357,6 +1380,7 @@ void filli_aot(void)
         printf("}\n");
     }
     
+    puts("free(frame);");
     puts("}");
 }
 
