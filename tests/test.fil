@@ -1,17 +1,13 @@
-print("h")
+if 1:
+    print("asdf")
+    let n = 100000000
+    let sum = 0
+    let flip = 1
+    for i in n:
+        sum += flip / (2 * i + 1)
+        flip *= -1
+    end
 
-print("q")
-
-let n = 100000000
-let sum = 0
-let flip = 1
-print(n)
-print(sum)
-print(flip)
-for i in n:
-    sum += flip / (2 * i + 1)
-    flip *= -1
+    print(sum * 4)
+    print("Done!")
 end
-
-print(sum * 4)
-print("Done!")

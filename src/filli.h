@@ -1124,7 +1124,7 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
             if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; }
         
         #define GLOBAL_MATH_SHARED(X)\
-            Value v2 = STACK_POP(1, 0);\
+            Value v2 = STACK_POP(2, 0);\
             uint16_t id = PROG_IDX(1);\
             Value v1 = global_frame->vars[id];\
             assert2(-1, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
@@ -1136,7 +1136,7 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
         NEXT_CASE(INST_SET_GLOBAL_DIV)    GLOBAL_MATH_SHARED(/)
         
         #define CAP_MATH_SHARED(X)\
-            Value v2 = STACK_POP(1, 0);\
+            Value v2 = STACK_POP(2, 0);\
             uint16_t id = PROG_IDX(1);\
             Value v1 = *(*frame)->caps[id];\
             assert2(-1, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
@@ -1352,6 +1352,8 @@ void filli_aot(void)
     puts("global_frame = frame;");
     puts("frame->pc = 0;");
     puts("");
+    puts("____dummy____:{};");
+    puts("(void)&&____dummy____;");
     
     for (size_t j = 0; j < global_prog->i;)
     {
