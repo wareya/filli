@@ -942,14 +942,15 @@ uint8_t val_truthy(Value v)
     return 0;
 }
 
+typedef struct _LoopPair { uint64_t l; uint64_t r; } LoopPair;
+
 typedef struct _Frame {
-    uint32_t pc;
-    uint32_t return_slot;
+    uint32_t pc, return_slot;
     struct _Frame * return_to;
     Value * set_tgt_agg;
     char * set_tgt_char;
     Value vars[FRAME_VARCOUNT], stack[FRAME_STACKSIZE];
-    double forloops[FORLOOP_COUNT_LIMIT];
+    LoopPair forloops[FORLOOP_COUNT_LIMIT];
     Value ** caps;
     Funcdef * fn;
 } Frame;
@@ -1139,8 +1140,10 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_SET_CAP_DIV)    CAP_MATH_SHARED(/)
         
         #define MATH_SHARED(X) BIN_STACKPOP(1)\
-            assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
-            frame->stack[PROG_IDX(1)] = val_float(v1.u.f X v2.u.f);
+            /*assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");*/\
+            if (v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT)\
+                frame->stack[PROG_IDX(1)] = val_float(v1.u.f X v2.u.f);\
+            else frame->stack[PROG_IDX(1)] = val_float(0.0);
         
         NEXT_CASE(INST_ADD)    MATH_SHARED(+)
         NEXT_CASE(INST_SUB)    MATH_SHARED(-)
@@ -1153,6 +1156,30 @@ size_t interpret(size_t from_pc)
         
         NEXT_CASE(INST_CMP_AND)    MATH_SHARED_BOOL(!!(v1.u.f) && !!(v2.u.f))
         NEXT_CASE(INST_CMP_OR)     MATH_SHARED_BOOL(!!(v1.u.f) || !!(v2.u.f))
+        
+        #define LOCAL_MATH_SHARED(X)\
+            Value v2 = frame->stack[PROG_IDX(2)];\
+            uint16_t id = PROG_IDX(1);\
+            Value v1 = frame->vars[id];\
+            assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
+            frame->vars[id] = val_float(v1.u.f X v2.u.f);
+        
+        NEXT_CASE(INST_SET_ADD)    LOCAL_MATH_SHARED(+)
+        NEXT_CASE(INST_SET_SUB)    LOCAL_MATH_SHARED(-)
+        NEXT_CASE(INST_SET_MUL)    LOCAL_MATH_SHARED(*)
+        NEXT_CASE(INST_SET_DIV)    LOCAL_MATH_SHARED(/)
+            
+        #define ADDR_MATH_SHARED(X)\
+            Value v2 = frame->stack[PROG_IDX(1)];\
+            Value * v1p = frame->set_tgt_agg;\
+            assert2(0, v1p && v2.tag == VALUE_FLOAT && v1p->tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
+            frame->set_tgt_agg = 0;\
+            *v1p = val_float(v1p->u.f X v2.u.f);
+        
+        NEXT_CASE(INST_SET_LOC_ADD)    ADDR_MATH_SHARED(+)
+        NEXT_CASE(INST_SET_LOC_SUB)    ADDR_MATH_SHARED(-)
+        NEXT_CASE(INST_SET_LOC_MUL)    ADDR_MATH_SHARED(*)
+        NEXT_CASE(INST_SET_LOC_DIV)    ADDR_MATH_SHARED(/)
         
         #define EQ_SHARED(X) BIN_STACKPOP(1)\
             int8_t equality = val_cmp(v1, v2);\
@@ -1170,17 +1197,16 @@ size_t interpret(size_t from_pc)
             assert2(0, v.tag == VALUE_FLOAT, "For loops can only operate on numbers");
             uint16_t id = PROG_IDX(1);
             uint16_t idx = PROG_IDX(2);
-            frame->forloops[idx] = v.u.f;
-            double temp = v.u.f;
-            assert2(0, temp - 1.0 != temp, "For loop value is too large and will never terminate");
             frame->vars[id] = val_float(0.0);
-            if (temp < 1.0) READ_AND_GOTO_TARGET(3)
+            if ((uint64_t)v.u.f < 1) READ_AND_GOTO_TARGET(3)
+            frame->forloops[idx].l = 0;
+            frame->forloops[idx].r = v.u.f;
         NEXT_CASE(INST_FOREND)
             uint16_t id = PROG_IDX(1);
-            assert2(0, frame->vars[id].tag == VALUE_FLOAT, "For loops can only handle numbers");
             uint16_t idx = PROG_IDX(2);
-            frame->vars[id].u.f += 1.0;
-            if (frame->vars[id].u.f < frame->forloops[idx]) READ_AND_GOTO_TARGET(3)
+            frame->forloops[idx].l += 1;
+            frame->vars[id].u.f = frame->forloops[idx].l;
+            if (frame->forloops[idx].l < frame->forloops[idx].r) READ_AND_GOTO_TARGET(3)
         
         NEXT_CASE(INST_JMP)    READ_AND_GOTO_TARGET(1)
         NEXT_CASE(INST_JMP_IF_FALSE)    if (!val_truthy(frame->stack[PROG_IDX(3)])) READ_AND_GOTO_TARGET(1)
@@ -1196,35 +1222,11 @@ size_t interpret(size_t from_pc)
             Value * v = &frame->vars[PROG_IDX(1)];
             if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; }
         
-        #define LOCAL_MATH_SHARED(X)\
-            Value v2 = frame->stack[PROG_IDX(2)];\
-            uint16_t id = PROG_IDX(1);\
-            Value v1 = frame->vars[id];\
-            assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
-            frame->vars[id] = val_float(v1.u.f X v2.u.f);
-        
-        NEXT_CASE(INST_SET_ADD)    LOCAL_MATH_SHARED(+)
-        NEXT_CASE(INST_SET_SUB)    LOCAL_MATH_SHARED(-)
-        NEXT_CASE(INST_SET_MUL)    LOCAL_MATH_SHARED(*)
-        NEXT_CASE(INST_SET_DIV)    LOCAL_MATH_SHARED(/)
-            
         NEXT_CASE(INST_SET_LOC)
             Value v2 = frame->stack[PROG_IDX(1)];
             if (frame->set_tgt_agg) { *frame->set_tgt_agg = v2; frame->set_tgt_agg = 0; }
             else { assert2(0, frame->set_tgt_char && v2.tag == VALUE_STRING, "Invalid assignment.");
                 *frame->set_tgt_char = **v2.u.s; frame->set_tgt_char = 0; }
-        
-        #define ADDR_MATH_SHARED(X)\
-            Value v2 = frame->stack[PROG_IDX(1)];\
-            Value * v1p = frame->set_tgt_agg;\
-            assert2(0, v1p && v2.tag == VALUE_FLOAT && v1p->tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
-            frame->set_tgt_agg = 0;\
-            *v1p = val_float(v1p->u.f X v2.u.f);
-        
-        NEXT_CASE(INST_SET_LOC_ADD)    ADDR_MATH_SHARED(+)
-        NEXT_CASE(INST_SET_LOC_SUB)    ADDR_MATH_SHARED(-)
-        NEXT_CASE(INST_SET_LOC_MUL)    ADDR_MATH_SHARED(*)
-        NEXT_CASE(INST_SET_LOC_DIV)    ADDR_MATH_SHARED(/)
         
         #define INDEX_SHARED(STR_VALID_OP) BIN_STACKPOP(1)\
             assert2(0, v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY || v1.tag == VALUE_DICT);\
