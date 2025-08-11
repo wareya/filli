@@ -548,10 +548,8 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         memcpy(prog.code + skip_at, &end, 4);
         
         uint32_t break_to = prog.i;
-        while (cs->loop_break_i > loop_break_base)
-            memcpy(prog.code + cs->loop_breaks[--cs->loop_break_i], &break_to, 4);
-        while (cs->loop_cont_i  > loop_cont_base )
-            memcpy(prog.code + cs->loop_conts [--cs->loop_cont_i ], &cont_to , 4);
+        while (cs->loop_break_i > loop_break_base) memcpy(prog.code + cs->loop_breaks[--cs->loop_break_i], &break_to, 4);
+        while (cs->loop_cont_i  > loop_cont_base ) memcpy(prog.code + cs->loop_conts [--cs->loop_cont_i ], &cont_to , 4);
         cs->loop_nesting--;
         
         return i + 1- orig_i;
@@ -612,10 +610,8 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         memcpy(prog.code + (head - 3), &end, 4);
         
         uint32_t break_to = prog.i;
-        while (cs->loop_break_i > loop_break_base)
-            memcpy(prog.code + cs->loop_breaks[--cs->loop_break_i], &break_to, 4);
-        while (cs->loop_cont_i  > loop_cont_base )
-            memcpy(prog.code + cs->loop_conts [--cs->loop_cont_i ], &cont_to , 4);
+        while (cs->loop_break_i > loop_break_base) memcpy(prog.code + cs->loop_breaks[--cs->loop_break_i], &break_to, 4);
+        while (cs->loop_cont_i  > loop_cont_base ) memcpy(prog.code + cs->loop_conts [--cs->loop_cont_i ], &cont_to , 4);
         cs->loop_nesting--;
         
         return i - orig_i;
