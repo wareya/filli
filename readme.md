@@ -33,6 +33,10 @@ Filli is meant to be used with BDWGC (aka Boehm GC) or some similar interior-poi
 - Limited "stdlib", not automatically exposed to your C environment (similar to Lua)
 - Root-level code runs normally, ergonomic for scripting
 
+## Note
+
+Filli compiles as a tail-call-dispatch interpreter by default, increasing its size cost by a few KB and making it only work with gcc and clang. To switch to a conventional loop-and-switch dispatch model, change the definition of `USE_TAIL_DISPATCH` from 1 to 0 in `filli.h`.
+
 ## Examples
 
 Functions, math, in-place math assignment:
