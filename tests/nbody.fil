@@ -1,0 +1,131 @@
+
+
+let sun = {}
+let jupiter = {}
+let saturn = {}
+let uranus = {}
+let neptune = {}
+
+
+
+let PI = 3.141592653589793
+let SOLAR_MASS = 4 * PI * PI
+let DAYS_PER_YEAR = 365.24
+sun["x"] = 0.0
+sun["y"] = 0.0
+sun["z"] = 0.0
+sun["vx"] = 0.0
+sun["vy"] = 0.0
+sun["vz"] = 0.0
+sun["m"] = SOLAR_MASS
+jupiter["x"] = 4.84143144246472090
+jupiter["y"] = -1.16032004402742839
+jupiter["z"] = -1.03622044471123109 / 10.0
+jupiter["vx"] = 1.66007664274403694 / 1000.0 * DAYS_PER_YEAR
+jupiter["vy"] = 7.69901118419740425 / 1000.0 * DAYS_PER_YEAR
+jupiter["vz"] = -6.90460016972063023 / 100000.0 * DAYS_PER_YEAR
+jupiter["m"] = 9.54791938424326609 / 10000.0 * SOLAR_MASS
+saturn["x"] = 8.34336671824457987
+saturn["y"] = 4.12479856412430479
+saturn["z"] = -4.03523417114321381 / 10.0
+saturn["vx"] = -2.76742510726862411 / 1000.0 * DAYS_PER_YEAR
+saturn["vy"] = 4.99852801234917238 / 1000.0 * DAYS_PER_YEAR
+saturn["vz"] = 2.30417297573763929 / 100000.0 * DAYS_PER_YEAR
+saturn["m"] = 2.85885980666130812 / 10000.0 * SOLAR_MASS
+uranus["x"] = 1.28943695621391310 * 10.0
+uranus["y"] = -1.51111514016986312 * 10.0
+uranus["z"] = -2.23307578892655734 / 10.0
+uranus["vx"] = 2.96460137564761618 / 1000.0 * DAYS_PER_YEAR
+uranus["vy"] = 2.37847173959480950 / 1000.0 * DAYS_PER_YEAR
+uranus["vz"] = -2.96589568540237556 / 100000.0 * DAYS_PER_YEAR
+uranus["m"] = 4.36624404335156298 / 100000.0 * SOLAR_MASS
+neptune["x"] = 1.53796971148509165 * 10.0
+neptune["y"] = -2.59193146099879641 * 10.0
+neptune["z"] = 1.79258772950371181 / 10.0
+neptune["vx"] = 2.68067772490389322 / 1000.0 * DAYS_PER_YEAR
+neptune["vy"] = 1.62824170038242295 / 1000.0 * DAYS_PER_YEAR
+neptune["vz"] = -9.51592254519715870 / 100000.0 * DAYS_PER_YEAR
+neptune["m"] = 5.15138902046611451 / 100000.0 * SOLAR_MASS
+
+let bodies = [sun, jupiter, saturn, uranus, neptune]
+
+func advance(bodies, dt):
+  for i in len(bodies):
+    let bi = bodies[i]
+    let bix = bi["x"]
+    let biy = bi["y"]
+    let biz = bi["z"]
+    let bimass = bi["m"]
+    let bivx = bi["vx"]
+    let bivy = bi["vy"]
+    let bivz = bi["vz"]
+    for j in len(bodies) - i - 1:
+      let bj = bodies[j + i + 1]
+      let dx = bix-bj["x"]
+      let dy = biy-bj["y"]
+      let dz = biz-bj["z"]
+      let dist2 = dx*dx + dy*dy + dz*dz
+      let mag = sqrt(dist2)
+      mag = dt / (mag * dist2)
+      let bm = bj["m"]*mag
+      bivx = bivx - (dx * bm)
+      bivy = bivy - (dy * bm)
+      bivz = bivz - (dz * bm)
+      bm = bimass*mag
+      bj["vx"] = bj["vx"] + (dx * bm)
+      bj["vy"] = bj["vy"] + (dy * bm)
+      bj["vz"] = bj["vz"] + (dz * bm)
+    end
+    bi["vx"] = bivx
+    bi["vy"] = bivy
+    bi["vz"] = bivz
+    bi["x"] = bix + dt * bivx
+    bi["y"] = biy + dt * bivy
+    bi["z"] = biz + dt * bivz
+  end
+end
+
+func energy(bodies):
+  let e = 0
+  for i in len(bodies):
+    let bi = bodies[i]
+    let vx = bi["vx"]
+    let vy = bi["vy"]
+    let vz = bi["vz"]
+    let bim = bi["m"]
+    e = e + (0.5 * bim * (vx*vx + vy*vy + vz*vz))
+    for j in len(bodies) - i - 1:
+      let bj = bodies[j + i + 1]
+      let dx = bi["x"]-bj["x"]
+      let dy = bi["y"]-bj["y"]
+      let dz = bi["z"]-bj["z"]
+      let distance = sqrt(dx*dx + dy*dy + dz*dz)
+      e = e - ((bim * bj["m"]) / distance)
+    end
+  end
+  return e
+end
+
+func offsetMomentum(b):
+  let px = 0
+  let py = 0
+  let pz = 0
+  for i in len(bodies):
+    let bi = b[i]
+    let bim = bi["m"]
+    px = px + (bi["vx"] * bim)
+    py = py + (bi["vy"] * bim)
+    pz = pz + (bi["vz"] * bim)
+  end
+  b[0]["vx"] = px * -1.0 / SOLAR_MASS
+  b[0]["vy"] = py * -1.0 / SOLAR_MASS
+  b[0]["vz"] = pz * -1.0 / SOLAR_MASS
+end
+
+let N = 100000
+
+offsetMomentum(bodies)
+print(energy(bodies))
+for i in N: advance(bodies, 0.01) end
+print(energy(bodies))
+

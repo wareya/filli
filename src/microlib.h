@@ -113,8 +113,11 @@ const char * baddtostr(double f)
     
     fi2 = f;
     for (size_t j = d; j > i;) { buf[--j] = '0' + (fi2 % 10); fi2 /= 10; }
-    for (size_t j = d; j > d - mag; j--) buf[j] = buf[j - 1];
-    buf[d-mag] = '.';
+    if (d >= mag)
+    {
+        for (size_t j = d; j > d - mag; j--) buf[j] = buf[j - 1];
+        buf[d-mag] = '.';
+    }
     
     return stringdup(buf);
 }
