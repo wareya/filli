@@ -1,3 +1,7 @@
+Filli AOT: A modified version of filli that uses ALMOST the same interpreter code, but set up in a way that lets it AOT compile to C instead.
+
+This version of the readme is slightly outdated. Read the version from the master branch!
+
 # Filli
 
 Filli is an ultra small (language code under 1000 SLOC) dynamic programming language written in pure C (C23, or C99 with GCCisms) with no dependencies.
