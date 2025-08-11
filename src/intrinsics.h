@@ -1,8 +1,6 @@
 #ifndef FILLI_INTRINSICS_H_INCLUDED
 #define FILLI_INTRINSICS_H_INCLUDED
 
-#include <math.h>
-
 uint16_t print_id;
 uint16_t typeof_id;
 uint16_t len_id;
@@ -97,7 +95,7 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame, size_t s
         int tag = v.tag;
         if (tag == VALUE_FLOAT)
         {
-            Value v2 = val_float(sqrt(v.u.f));
+            Value v2 = val_float(__builtin_sqrt(v.u.f));
             STACK_PUSH2(v2)
         }
         else panic2(,"Tried to use sqrt() on a non-number");
