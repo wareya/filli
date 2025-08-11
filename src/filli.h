@@ -605,6 +605,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         int16_t id = lex_ident_offset - tokens[i++].kind;
         if (cs->func_depth == 0) cs->globals_reg[id] = ++cs->globals_n;
         else                     cs->locals_reg [id] = ++cs->locals_n;
+        uint16_t idnum = (cs->func_depth == 0) ? cs->globals_n - 1 : cs->locals_n - 1;
         assert2(0, cs->globals_n < FRAME_VARCOUNT && cs->locals_n < FRAME_VARCOUNT, "Too many variables");
         assert2(0, token_is(source, tokens, count, i++, "in"), "Expected 'in'");
         uint16_t idx = cs->for_loop_index++;
@@ -614,7 +615,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         assert2(0, ret > 0, "For loop requires valid expression");
         i += ret;
         
-        prog_write6(INST_FORSTART, (cs->func_depth == 0) ? cs->globals_n - 1 : cs->locals_n - 1, idx, 0, 0, COMP_SPOP);
+        prog_write6(INST_FORSTART, idnum, idx, 0, 0, COMP_SPOP);
         
         uint32_t head = global_prog->i;
         
@@ -624,7 +625,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         assert2(0, tokens[i++].kind == -11, "Expected 'end'");
         
         uint32_t cont_to = global_prog->i;
-        prog_write5(INST_FOREND, (cs->func_depth == 0) ? cs->globals_n - 1 : cs->locals_n - 1, idx, 0, 0);
+        prog_write5(INST_FOREND, idnum, idx, 0, 0);
         memcpy(global_prog->code + (global_prog->i - 2), &head, 4);
         global_prog->is_jumptarget[head] |= 1;
         
@@ -1254,8 +1255,8 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
         NEXT_CASE(INST_INDEX)    INDEX_SHARED(<=)
             if (v1.tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *));
                 *ss = stringdupn(*v1.u.s + (size_t)v2.u.f, 1); v1.u.s = ss; }
-            if (v1.tag == VALUE_ARRAY)  v1 = *array_get(v1.u.a, v2.u.f);
-            if (v1.tag == VALUE_DICT)   v1 = dict_get_or_insert(v1.u.d, v2)->r;
+            else if (v1.tag == VALUE_ARRAY)  v1 = *array_get(v1.u.a, v2.u.f);
+            else if (v1.tag == VALUE_DICT)   v1 = dict_get_or_insert(v1.u.d, v2)->r;
             (*frame)->stack[PROG_IDX(1)] = v1;
         
         NEXT_CASE(INST_INDEX_LOC)    INDEX_SHARED(<)
@@ -1263,8 +1264,8 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
             //  whether a string value is going to be used as a "place"/"lvalue" or not.
             if (v1.tag == VALUE_STRING) { assert2(-1, (size_t)v2.u.f <= strlen(*v1.u.s), "Index past end of string");
                 *v1.u.s = stringdupn(*v1.u.s, strlen(*v1.u.s) + 1); (*frame)->set_tgt_char = *v1.u.s + (size_t)v2.u.f; }
-            if (v1.tag == VALUE_ARRAY)  (*frame)->set_tgt_agg = array_get(v1.u.a, v2.u.f);
-            if (v1.tag == VALUE_DICT)   (*frame)->set_tgt_agg = &(dict_get_or_insert(v1.u.d, v2)->r);
+            else if (v1.tag == VALUE_ARRAY)  (*frame)->set_tgt_agg = array_get(v1.u.a, v2.u.f);
+            else if (v1.tag == VALUE_DICT)   (*frame)->set_tgt_agg = &(dict_get_or_insert(v1.u.d, v2)->r);
         
         NEXT_CASE(INST_LAMBDA)
             Value v = val_func(PROG_IDX(1));

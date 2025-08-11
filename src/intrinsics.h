@@ -1,6 +1,8 @@
 #ifndef FILLI_INTRINSICS_H_INCLUDED
 #define FILLI_INTRINSICS_H_INCLUDED
 
+#include <math.h>
+
 uint16_t print_id;
 uint16_t typeof_id;
 uint16_t len_id;
@@ -10,6 +12,7 @@ uint16_t array_remove_id;
 uint16_t dict_remove_id;
 uint16_t truthy_id;
 uint16_t not_id;
+uint16_t sqrt_id;
 
 void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame, size_t stackpos, size_t return_slot)
 {
@@ -86,6 +89,18 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame, size_t s
             STACK_PUSH2(v2)
         }
         else panic2(,"Tried to use keys() on a non-dictionary");
+    }
+    else if (id == sqrt_id)
+    {
+        assert2(, argcount == 1, "Wrong number of arguments to function");
+        Value v = frame->stack[stackpos];
+        int tag = v.tag;
+        if (tag == VALUE_FLOAT)
+        {
+            Value v2 = val_float(sqrt(v.u.f));
+            STACK_PUSH2(v2)
+        }
+        else panic2(,"Tried to use sqrt() on a non-number");
     }
     else if (id == array_insert_id)
     {
@@ -172,6 +187,7 @@ void register_intrinsic_funcs(void)
     REGISTER(dict_remove)
     REGISTER(truthy)
     REGISTER(not)
+    REGISTER(sqrt)
 }
 
 #endif
