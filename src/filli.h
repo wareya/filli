@@ -482,8 +482,9 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
     size_t orig_i = i;
     if (tokens[i].kind == -1) // if
     {
-        i += compile_expr(source, tokens, count, i + 1, 0) + 1;
-        assert2(0, token_is(source, tokens, count, i++, ":"));
+        size_t r = compile_expr(source, tokens, count, i + 1, 0);
+        i += r + 1;
+        assert2(0, token_is(source, tokens, count, i++, ":") && r != 0, "Conditions must not be empty");
         prog_write4(INST_JMP_IF_FALSE, 0, 0, COMP_SPOP);
         size_t jump_at = prog.i - 3;
         
@@ -504,8 +505,9 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
             
             if (tokens[i].kind == -3) // elif
             {
-                i += compile_expr(source, tokens, count, i + 1, 0) + 1;
-                assert2(0, token_is(source, tokens, count, i++, ":"));
+                size_t r = compile_expr(source, tokens, count, i + 1, 0);
+                i += r + 1;
+                assert2(0, token_is(source, tokens, count, i++, ":") && r != 0, "Conditions must not be empty");
                 prog_write4(INST_JMP_IF_FALSE, 0, 0, COMP_SPOP);
                 size_t jump_at = prog.i - 3;
                 
@@ -532,8 +534,9 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         size_t loop_break_base = cs->loop_break_i;
         
         size_t expr_i = i + 1;
-        i += compile_expr(source, tokens, count, expr_i, 0) + 1;
-        assert2(0, token_is(source, tokens, count, i++, ":"), "Expected ':'");
+        size_t r = compile_expr(source, tokens, count, expr_i, 0);
+        i += r + 1;
+        assert2(0, token_is(source, tokens, count, i++, ":") && r != 0, "Conditions must not be empty");
         prog_write4(INST_JMP_IF_FALSE, 0, 0, COMP_SPOP);
         size_t skip_at = prog.i - 3;
         uint32_t loop_at = prog.i;
@@ -591,15 +594,13 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         uint16_t idx = cs->for_loop_index++;
         assert2(0, idx < FORLOOP_COUNT_LIMIT, "Too many for loops");
         
-        size_t ret = compile_expr(source, tokens, count, i, 0);
-        assert2(0, ret > 0, "For loop requires valid expression");
-        i += ret;
+        size_t r = compile_expr(source, tokens, count, i, 0);
+        i += r + 1;
+        assert2(0, token_is(source, tokens, count, i++, ":") && r > 0, "For loop requires valid expression");
         
         prog_write6(INST_FORSTART, idnum, idx, 0, 0, COMP_SPOP);
         
         uint32_t head = prog.i;
-        
-        assert2(0, token_is(source, tokens, count, i++, ":"), "Expected ':'");
         
         i += compile_statementlist(source, tokens, count, i);
         assert2(0, tokens[i++].kind == -11, "Expected 'end'");
@@ -688,7 +689,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
     else if (token_is(source, tokens, count, i, "yield"))
     {
         size_t r = compile_expr(source, tokens, count, ++i, 0);
-        if (r == 0) prog_write3(PUSH_NULL, INST_YIELD, COMP_SPOP);
+        if (r == 0) prog_write3(PUSH_NULL, INST_YIELD, COMP_S);
         else        prog_write2(INST_YIELD, COMP_SPOP);
         return r + 1;
     }
