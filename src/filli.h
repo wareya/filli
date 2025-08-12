@@ -1254,7 +1254,7 @@ double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
         NEXT_CASE(INST_INDEX)    INDEX_SHARED(<=)
             if (v1.tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *));
                 *ss = stringdupn(*v1.u.s + (size_t)v2.u.f, 1); v1.u.s = ss; }
-            else if (v1.tag == VALUE_ARRAY)  v1 = *array_get(v1.u.a, v2.u.f);
+            else if (v1.tag == VALUE_ARRAY) { Value * vp = array_get(v1.u.a, v2.u.f); if (!vp) return 0; v1 = *vp; }
             else if (v1.tag == VALUE_DICT)   v1 = dict_get_or_insert(v1.u.d, v2)->r;
             (*frame)->stack[PROG_IDX(1)] = v1;
         
