@@ -286,7 +286,7 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
     }
     else if (tokens[i].kind == 1)
     {
-        assert(tokens[i].len >= 2, "Invalid string literal");
+        assert2(0, tokens[i].len >= 2, "Invalid string literal");
         size_t l = tokens[i].len - 2;
         const char * sold = source + tokens[i].i + 1;
         char * s = stringdupn(sold, l);
