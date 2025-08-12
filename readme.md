@@ -1,6 +1,6 @@
 Filli AOT: A modified version of filli that uses ALMOST the same interpreter code, but set up in a way that lets it AOT compile to C instead.
 
-This version of the readme is slightly outdated. Read the version from the master branch!
+This version of the readme is slightly outdated. Read the version from the main branch! Also, the length and size statements written here don't apply to the AOT branch.
 
 # Filli
 

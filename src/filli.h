@@ -211,7 +211,7 @@ typedef struct _Program { uint16_t * code; uint32_t capacity; uint32_t i; uint32
 void init_program(Program * prog) { prog->capacity = PROGRAM_MAXLEN; prog->code = (uint16_t *)zalloc(sizeof(uint16_t) * prog->capacity); prog->is_jumptarget = (uint8_t *)zalloc(prog->capacity); prog->i = 0; }
 
 Program * global_prog;
-void prog_write(uint16_t a) { global_prog->code[global_prog->i++] = a; }
+void prog_write(uint16_t a) { if (global_prog->i < PROGRAM_MAXLEN) global_prog->code[global_prog->i++] = a; else panic2(,"Compiled program longer than PROGRAM_MAXLEN"); }
 void prog_write2(uint16_t a, uint16_t b) { prog_write(a); prog_write(b); }
 void prog_write3(uint16_t a, uint16_t b, uint16_t c) { prog_write2(a, b); prog_write(c); }
 void prog_write4(uint16_t a, uint16_t b, uint16_t c, uint16_t d) { prog_write3(a, b, c); prog_write(d); }
@@ -257,7 +257,7 @@ void compiler_state_init(void)
                                   0, 0, {}, {}, 0, 0, 0, {}, {}, {} };
 }
 
-#define COMP_SPUSH ( assert(cs->stackpos[cs->func_depth] < 1024), cs->stackpos[cs->func_depth]++ )
+#define COMP_SPUSH ( assert2(0,cs->stackpos[cs->func_depth] < 1024, "Stack exceeded limit."), cs->stackpos[cs->func_depth]++ )
 #define COMP_S cs->stackpos[cs->func_depth]
 #define COMP_SPOP ( assert(cs->stackpos[cs->func_depth] != 0), --cs->stackpos[cs->func_depth] )
 
@@ -386,14 +386,16 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
         compile_func_end();
         cs->locals_n = prev_locals_n ;
         
-        if (r == 0) panic2(0, "Lambda body is invalid");
+        assert2(0, r != 0, "Lambda body is invalid");
         
         return i + r - orig_i;
     }
     if (token_is(source, tokens, count, i, "(")) // wrapped expr
     {
+        size_t start_prog_i = global_prog->i;
         size_t ret = compile_expr(source, tokens, count, i+1, 0) + 1;
         assert2(0, token_is(source, tokens, count, i + ret, ")"), "Unclosed parens");
+        assert2(0, global_prog->i != start_prog_i, "Paren expressions must not be empty");
         return ret + 1;
     }
     if (token_is(source, tokens, count, i, "[")) // array literal
@@ -402,8 +404,7 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
         
         PARSE_COMMALIST("]", return 0, return 0, assert2(0, j < 32000, "Too many values in array literal"),
             size_t r = compile_expr(source, tokens, count, i, 0);
-            if (r == 0) return 0;
-            i += r;
+            if (r == 0) return 0; i += r;
         )
         for (size_t i = 0; i < j; i++) COMP_SPOP;
         prog_write3(INST_ARRAY_LITERAL, j, COMP_SPUSH);
@@ -423,8 +424,7 @@ size_t compile_expr(const char * source, Token * tokens, size_t count, size_t i,
     {
         size_t r = compile_binexpr(source, tokens, count, i);
         ret += r;
-        i += r;
-        if (r == 0) break;
+        i += r; if (r == 0) break;
     }
     
     return ret;
@@ -441,8 +441,7 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
         size_t orig_i = i++; // skip (
         PARSE_COMMALIST(")",  return 0, return 0, assert2(0, j < ARGLIMIT, "Too many arguments to function"),
             size_t r = compile_expr(source, tokens, count, i, 0);
-            if (r == 0) return 0;
-            i += r;
+            if (r == 0) return 0; i += r;
         )
         for (size_t i = 0; i < j; i++) COMP_SPOP;
         COMP_SPOP;
@@ -687,8 +686,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         
         PARSE_COMMALIST(")", return 0, return 0, assert2(0, j < ARGLIMIT, "Too many arguments to function"),
             size_t r = compile_expr(source, tokens, count, i, 0);
-            if (r == 0) return 0;
-            i += r;
+            if (r == 0) return 0; i += r;
         )
         
         for (size_t i = 0; i < j; i++) (void)COMP_SPOP;
@@ -766,8 +764,8 @@ size_t compile_statementlist(const char * source, Token * tokens, size_t count, 
     {
         if (i >= count) return i - orig_i;
         size_t r = compile_statement(source, tokens, count, i);
-        if (r == 0) return i - orig_i;
         i += r;
+        if (r == 0) return i - orig_i;
     }
 }
 
