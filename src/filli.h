@@ -286,6 +286,7 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
     }
     else if (tokens[i].kind == 1)
     {
+        assert(tokens[i].len >= 2, "Invalid string literal");
         size_t l = tokens[i].len - 2;
         const char * sold = source + tokens[i].i + 1;
         char * s = stringdupn(sold, l);
@@ -702,7 +703,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         }
         i += r;
         
-        if (prog.code[prog.i - 2] == INST_INDEX && (token_is(source, tokens, count, i, "=")
+        if (prog.i >= 2 && prog.code[prog.i - 2] == INST_INDEX && (token_is(source, tokens, count, i, "=")
              || token_is(source, tokens, count, i, "+=") || token_is(source, tokens, count, i, "-=")
              || token_is(source, tokens, count, i, "*=") || token_is(source, tokens, count, i, "/=")))
         {
