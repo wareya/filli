@@ -257,7 +257,7 @@ void compiler_state_init(void)
                                   0, 0, {}, {}, 0, 0, 0, {}, {}, {} };
 }
 
-#define COMP_SPUSH ( assert2(0,cs->stackpos[cs->func_depth] < 1024, "Stack exceeded limit."), cs->stackpos[cs->func_depth]++ )
+#define COMP_SPUSH ( assert2(0, ((void)"Stack exceeded limit.", cs->stackpos[cs->func_depth] < 1024)), (cs->stackpos[cs->func_depth] += (cs->stackpos[cs->func_depth] < 1024)) - 1 )
 #define COMP_S cs->stackpos[cs->func_depth]
 #define COMP_SPOP ( assert(cs->stackpos[cs->func_depth] != 0), --cs->stackpos[cs->func_depth] )
 
