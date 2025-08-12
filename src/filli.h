@@ -255,7 +255,7 @@ void compiler_state_init(void)
 }
 
 //#define COMP_SPUSH ( assert(((void)"Stack exceeded limit.", cs->stackpos[cs->func_depth] < 1024)), cs->stackpos[cs->func_depth]++ )
-#define COMP_SPUSH ( assert3(((void)"Stack exceeded limit.", cs->stackpos[cs->func_depth] < 1024)), cs->stackpos[cs->func_depth] += (cs->stackpos[cs->func_depth] < 1024) )
+#define COMP_SPUSH ( assert3(((void)"Stack exceeded limit.", cs->stackpos[cs->func_depth] < 1024)), (cs->stackpos[cs->func_depth] += (cs->stackpos[cs->func_depth] < 1024)) - 1 )
 #define COMP_S cs->stackpos[cs->func_depth]
 #define COMP_SPOP ( assert(cs->stackpos[cs->func_depth] != 0), --cs->stackpos[cs->func_depth] )
 
@@ -850,21 +850,21 @@ typedef struct _Value {
 } Value;
 typedef struct _BiValue { struct _Value l; struct _Value r; } BiValue;
 
-Value val_tagged(uint8_t tag) { Value v; memset(&v, 0, sizeof(Value)); v.tag = tag; return v; }
-Value val_float(double f) { Value v = val_tagged(VALUE_FLOAT); v.u.f = f; return v; }
-Value val_string(char * s) { Value v = val_tagged(VALUE_STRING); v.u.s = (char **)zalloc(sizeof(char *)); *v.u.s = s; return v; }
-Value val_func(uint16_t id) { Value v = val_tagged(VALUE_FUNC); v.u.fn = &cs->funcs_reg[id]; return v; }
+inline Value val_tagged(uint8_t tag) { Value v; memset(&v, 0, sizeof(Value)); v.tag = tag; return v; }
+inline Value val_float(double f) { Value v = val_tagged(VALUE_FLOAT); v.u.f = f; return v; }
+inline Value val_string(char * s) { Value v = val_tagged(VALUE_STRING); v.u.s = (char **)zalloc(sizeof(char *)); *v.u.s = s; return v; }
+inline Value val_func(uint16_t id) { Value v = val_tagged(VALUE_FUNC); v.u.fn = &cs->funcs_reg[id]; return v; }
 
 typedef struct _FState { Funcdef * fn; struct _Frame * frame; } FState;
-FState * new_fstate(Funcdef * fn) { FState * r = (FState *)zalloc(sizeof(FState)); r->fn = fn; return r; }
-Value val_funcstate(Funcdef * fn, struct _Frame * frame) { Value v = val_tagged(VALUE_STATE); v.u.fs = new_fstate(fn); v.u.fs->frame = frame; return v; }
+inline FState * new_fstate(Funcdef * fn) { FState * r = (FState *)zalloc(sizeof(FState)); r->fn = fn; return r; }
+inline Value val_funcstate(Funcdef * fn, struct _Frame * frame) { Value v = val_tagged(VALUE_STATE); v.u.fs = new_fstate(fn); v.u.fs->frame = frame; return v; }
 
-Value val_array(size_t n) { Value v = val_tagged(VALUE_ARRAY); v.u.a = (Array *)zalloc(sizeof(Array));
+inline Value val_array(size_t n) { Value v = val_tagged(VALUE_ARRAY); v.u.a = (Array *)zalloc(sizeof(Array));
     *v.u.a = FI_LIT(Array) { (Value *)zalloc(sizeof(Value) * n), n, n }; return v; }
 
-Value * array_get(Array * a, size_t i) { assert2(0, i < a->len); return a->buf + i; }
+inline Value * array_get(Array * a, size_t i) { assert2(0, i < a->len); return a->buf + i; }
 
-int8_t val_cmp(Value v1, Value v2)
+inline int8_t val_cmp(Value v1, Value v2)
 {
     // -1: less than
     //  0: equal
@@ -880,8 +880,8 @@ int8_t val_cmp(Value v1, Value v2)
 }
 
 
-uint64_t double_bits_safe(double f) { if (f == 0.0) return 0; uint64_t n = 0; memcpy(&n, &f, 8); return n; }
-uint64_t val_hash(Value * v)
+inline uint64_t double_bits_safe(double f) { if (f == 0.0) return 0; uint64_t n = 0; memcpy(&n, &f, 8); return n; }
+inline uint64_t val_hash(Value * v)
 {
     assert2(0, v->tag == VALUE_STRING || v->tag == VALUE_FLOAT || v->tag == VALUE_FUNC || v->tag == VALUE_NULL,
            "Tried to use an unhashable type (dict or array) as a dict key");
@@ -897,7 +897,7 @@ uint64_t val_hash(Value * v)
 }
 
 // newcap must be a power of 2
-void dict_reallocate(Dict * d, size_t newcap)
+inline void dict_reallocate(Dict * d, size_t newcap)
 {
     BiValue * newbuf = (BiValue *)zalloc(sizeof(BiValue) * newcap);
     for (size_t i = 0; i < newcap; i++)
@@ -914,7 +914,7 @@ void dict_reallocate(Dict * d, size_t newcap)
     d->buf = newbuf;
 }
 // Open-addressing hashmap that uses tombstones for deletion.
-BiValue * dict_get_or_insert(Dict * d, Value v)
+inline BiValue * dict_get_or_insert(Dict * d, Value v)
 {
     if (d->cap == 0) dict_reallocate(d, 8);
     // max 50% load factor
@@ -930,7 +930,7 @@ BiValue * dict_get_or_insert(Dict * d, Value v)
     return &d->buf[hash];
 }
 
-uint8_t val_truthy(Value v)
+inline uint8_t val_truthy(Value v)
 {
     if (v.tag == VALUE_FLOAT)   return v.u.f != 0.0;
     if (v.tag == VALUE_STRING)  return (*v.u.s)[0] != 0;
@@ -955,7 +955,7 @@ typedef struct _Frame {
 
 void print_op_and_panic(uint16_t op) { prints("---\n"); printu16hex(op); prints("\n---\n"); panic2(, "Unknown operation"); }
 
-void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame, size_t stackpos, size_t return_slot);
+inline void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame, size_t stackpos, size_t return_slot);
 
 #define INSTX(X) size_t _handler_##X(Frame *, Frame *);
 INST_XMACRO()
