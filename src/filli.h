@@ -37,12 +37,20 @@
 #include "microlib.h"
 
 const char * filli_err = 0;
+
 #define assert2(N, X, ...) { if (!(X)) { if (__VA_OPT__(1)+0 && !filli_err) filli_err = #__VA_ARGS__; else if (!filli_err) filli_err = #X; return N; } }
-#define assert3(X, ...) (( (!(X)) ? ( (__VA_OPT__(1)+0 && !filli_err) ? filli_err = #__VA_ARGS__ : (!filli_err) ? filli_err = #X : "") : ""), (void) 0 )
 //#define assert2(N, X, ...) assert(X, __VA_ARGS__)
+#define assert3(X, ...) (( (!(X)) ? ( (__VA_OPT__(1)+0 && !filli_err) ? filli_err = #__VA_ARGS__ : (!filli_err) ? filli_err = #X : "") : ""), (void) 0 )
 #define panic2(N, X) { if (!filli_err) filli_err = #X; return N; }
 //#define panic2(N, X) panic(X)
+#define repanic(N) {}
+
+/*
+#define assert2(N, X, ...) ((void)(X))
+#define assert3(X, ...) ((void)(X))
+#define panic2(N, X) panic(X)
 #define repanic(N) { if (filli_err) return N; }
+*/
 
 void * zalloc(size_t s) { char * r = (char *)malloc(s); if (!r) panic("Out of memory"); memset(r, 0, s); return r; }
 
@@ -956,11 +964,11 @@ void print_op_and_panic(uint16_t op) { prints("---\n"); printu16hex(op); prints(
 
 void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame, size_t stackpos, size_t return_slot);
 
-#define INSTX(X) __attribute__((preserve_none)) static size_t _handler_##X(size_t * _ops, Frame *, Frame *);
+#define INSTX(X)  static size_t _handler_##X(Program * prog, void * _ops, size_t pc, uint16_t * code, Frame *, Frame *);
 INST_XMACRO()
 #undef INSTX
 
-typedef __attribute__((preserve_none)) size_t (*handler)(size_t * _ops, Frame * frame, Frame * global_frame);
+typedef  size_t (*handler)(Program * prog, void * _ops, size_t pc, uint16_t * code, Frame * frame, Frame * global_frame);
 static handler ops[0x100] = {};
 
 uint32_t fi_mem_read_u32(void * from) { uint32_t n; memcpy(&n, from, 4); return n; }
@@ -989,25 +997,25 @@ size_t interpret(size_t from_pc)
     #define INSTX(X) ops[(X&0xFF)] = _handler_##X;
     INST_XMACRO()
     
-    #define CASES_START() uint16_t op = prog.code[frame->pc]; return ops[op & 0xFF]((size_t *) ops, frame, global_frame);
+    #define CASES_START() uint16_t op = prog.code[frame->pc]; return ops[op & 0xFF](&prog, (void *) ops, frame->pc, prog.code, frame, global_frame);
     #define CASES_END()
     
-    #define PC_INC() frame->pc += op >> 8; op = prog.code[frame->pc];
+    #define PC_INC() frame->pc += op >> 8; pc = frame->pc; op = code[pc];
     
-    #define MARK_CASE(X) } __attribute__((preserve_none)) static size_t _handler_##X(size_t * _ops, Frame * frame, Frame * global_frame) { uint16_t op = X; repanic(frame->pc); handler * ops = (handler *)_ops;
-    #define END_CASE() PC_INC(); __attribute__((musttail)) return ops[op & 0xFF](_ops, frame, global_frame);
+    #define MARK_CASE(X) }  static size_t _handler_##X(Program * prog, void * _ops, size_t pc, uint16_t * code, Frame * frame, Frame * global_frame) { uint16_t op = X; repanic(frame->pc); handler * ops = (handler *)_ops;
+    #define END_CASE() PC_INC(); __attribute__((musttail)) return ops[op & 0xFF](prog, _ops, pc, code, frame, global_frame);
     #define DECAULT_CASE()
     
-    #define DISPATCH_IMMEDIATELY() op = prog.code[frame->pc]; __attribute__((musttail)) return ops[op & 0xFF](_ops, frame, global_frame);
+    #define DISPATCH_IMMEDIATELY() op = code[pc]; __attribute__((musttail)) return ops[op & 0xFF](prog, _ops, pc, code, frame, global_frame);
 #else
     
     // This, on the other hand, is a conventional loop-over-switch-statement interpreter dispatch system.
     
     #define CASES_START() \
-    while (frame->pc < prog.i) { repanic(frame->pc); uint16_t op = prog.code[frame->pc]; switch (op) {
+    while (frame->pc < prog->i) { repanic(frame->pc); uint16_t op = prog->code[frame->pc]; switch (op) {
     #define CASES_END() } } return frame->pc;
     
-    #define PC_INC() frame->pc += op >> 8
+    #define PC_INC() { frame->pc += op >> 8; pc = frame->pc; }
     
     #define MARK_CASE(X) case X: {
     #define END_CASE() PC_INC(); continue; }
@@ -1019,12 +1027,12 @@ size_t interpret(size_t from_pc)
 
     CASES_START()
         #define READ_AND_GOTO_TARGET(X)\
-            { uint32_t target = fi_mem_read_u32(prog.code + (frame->pc + X)); frame->pc = target; DISPATCH_IMMEDIATELY(); }
+            { uint32_t target = fi_mem_read_u32(code + (pc + X)); frame->pc = target; pc = target; DISPATCH_IMMEDIATELY(); }
         
         MARK_CASE(INST_INVALID)     { panic("sdfakarwiu"); }
         NEXT_CASE(INST_FUNCDEF)     READ_AND_GOTO_TARGET(1)
         
-        #define PROG_IDX(X) prog.code[frame->pc + (X)]
+        #define PROG_IDX(X) code[pc + (X)]
         #define STACK_PUSH(X, Y) { frame->stack[PROG_IDX(X)] = (Y); }
         
         NEXT_CASE(INST_ARRAY_LITERAL)
@@ -1043,11 +1051,12 @@ size_t interpret(size_t from_pc)
                 next->return_to = frame;\
                 frame->return_slot = return_slot;\
                 frame = next;\
+                pc = frame->pc;\
                 assert2(0, argcount == fn->argcount, "Function arg count doesn't match");\
                 if (!(FORCED)) for (size_t i = 0; i < fn->argcount; i++) {\
                     frame->vars[i] = prev->stack[idx + i]; Value * v = &frame->vars[i];\
                     if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; } }\
-                if (!(FORCED)) { frame->pc = fn->loc; if (fn->cap_data) frame->caps = fn->cap_data; }\
+                if (!(FORCED)) { frame->pc = fn->loc; pc = fn->loc; if (fn->cap_data) frame->caps = fn->cap_data; }\
                 DISPATCH_IMMEDIATELY(); }\
             handle_intrinsic_func(fn->id, argcount, frame, idx, return_slot); // intrinsics
         
@@ -1064,7 +1073,7 @@ size_t interpret(size_t from_pc)
             ENTER_FUNC(PROG_IDX(2) + 1, PROG_IDX(2), v_func.tag == VALUE_FUNC ? 0 : v_func.u.fs->frame)
         
         #define RETURN_WITH(X) if (!frame->return_to) { PC_INC(); return frame->pc; }\
-            Value retval = (X); frame = frame->return_to; frame->stack[frame->return_slot] = retval; DISPATCH_IMMEDIATELY();
+            Value retval = (X); frame = frame->return_to; pc = frame->pc; frame->stack[frame->return_slot] = retval; DISPATCH_IMMEDIATELY();
         
         NEXT_CASE(INST_YIELD)
             if (!frame->return_to) panic2(0, "Attempted to yield from not inside of a function");
@@ -1092,7 +1101,7 @@ size_t interpret(size_t from_pc)
             STACK_PUSH(1, v)
         
         NEXT_CASE(PUSH_NUM)
-            STACK_PUSH(5, val_float(fi_mem_read_f64(prog.code + frame->pc + 1)))
+            STACK_PUSH(5, val_float(fi_mem_read_f64(prog->code + frame->pc + 1)))
         
         NEXT_CASE(PUSH_GLOBAL)
         STACK_PUSH(2, global_frame->vars[PROG_IDX(1)])

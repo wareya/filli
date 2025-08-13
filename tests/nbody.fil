@@ -57,9 +57,6 @@ func advance(N, bodies, dt):
       let biy = bi[1]
       let biz = bi[2]
       let bimass = bi[6]
-      let bivx = bi[3]
-      let bivy = bi[4]
-      let bivz = bi[5]
       for j in len(bodies) - i - 1:
         let bj = bodies[j + i + 1]
         let dx = bix-bj[0]
@@ -69,20 +66,17 @@ func advance(N, bodies, dt):
         let mag = sqrt(dist2)
         mag = dt / (mag * dist2)
         let bm = bj[6]*mag
-        bivx = bivx - (dx * bm)
-        bivy = bivy - (dy * bm)
-        bivz = bivz - (dz * bm)
+        bi[3] -= (dx * bm)
+        bi[4] -= (dy * bm)
+        bi[5] -= (dz * bm)
         bm = bimass*mag
-        bj[3] = bj[3] + (dx * bm)
-        bj[4] = bj[4] + (dy * bm)
-        bj[5] = bj[5] + (dz * bm)
+        bj[3] += (dx * bm)
+        bj[4] += (dy * bm)
+        bj[5] += (dz * bm)
       end
-      bi[3] = bivx
-      bi[4] = bivy
-      bi[5] = bivz
-      bi[0] = bix + dt * bivx
-      bi[1] = biy + dt * bivy
-      bi[2] = biz + dt * bivz
+      bi[0] += dt * bi[3]
+      bi[1] += dt * bi[4]
+      bi[2] += dt * bi[5]
     end
   end
 end
@@ -102,7 +96,7 @@ func energy(bodies):
       let dy = bi[1]-bj[1]
       let dz = bi[2]-bj[2]
       let distance = sqrt(dx*dx + dy*dy + dz*dz)
-      e = e - ((bim * bj[6]) / distance)
+      e -= ((bim * bj[6]) / distance)
     end
   end
   return e
