@@ -595,7 +595,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         assert2(0, idx < FORLOOP_COUNT_LIMIT, "Too many for loops");
         
         size_t r = compile_expr(source, tokens, count, i, 0);
-        i += r + 1;
+        i += r;
         assert2(0, token_is(source, tokens, count, i++, ":") && r > 0, "For loop requires valid expression");
         
         prog_write6(INST_FORSTART, idnum, idx, 0, 0, COMP_SPOP);
