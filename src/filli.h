@@ -421,8 +421,7 @@ size_t compile_expr(const char * source, Token * tokens, size_t count, size_t i,
     {
         size_t r = compile_binexpr(source, tokens, count, i);
         ret += r;
-        i += r;
-        if (r == 0) break;
+        if (r == 0) break; else i += r;
     }
     
     return ret;
@@ -732,8 +731,7 @@ size_t compile_statementlist(const char * source, Token * tokens, size_t count, 
     {
         if (i >= count) return i - orig_i;
         size_t r = compile_statement(source, tokens, count, i);
-        if (r == 0) return i - orig_i;
-        i += r;
+        if (r == 0) return i - orig_i; else i += r;
     }
 }
 
@@ -958,11 +956,12 @@ void print_op_and_panic(uint16_t op) { prints("---\n"); printu16hex(op); prints(
 
 void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame, size_t stackpos, size_t return_slot);
 
-#define INSTX(X) size_t _handler_##X(Frame *, Frame *);
+#define INSTX(X) __attribute__((preserve_none)) static size_t _handler_##X(size_t * _ops, Frame *, Frame *);
 INST_XMACRO()
 #undef INSTX
 
-size_t (*ops[0x100])(Frame * frame, Frame * global_frame) = {};
+typedef __attribute__((preserve_none)) size_t (*handler)(size_t * _ops, Frame * frame, Frame * global_frame);
+static handler ops[0x100] = {};
 
 uint32_t fi_mem_read_u32(void * from) { uint32_t n; memcpy(&n, from, 4); return n; }
 double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
@@ -990,16 +989,16 @@ size_t interpret(size_t from_pc)
     #define INSTX(X) ops[(X&0xFF)] = _handler_##X;
     INST_XMACRO()
     
-    #define CASES_START() uint16_t op = prog.code[frame->pc]; return ops[op & 0xFF](frame, global_frame);
+    #define CASES_START() uint16_t op = prog.code[frame->pc]; return ops[op & 0xFF]((size_t *) ops, frame, global_frame);
     #define CASES_END()
     
     #define PC_INC() frame->pc += op >> 8; op = prog.code[frame->pc];
     
-    #define MARK_CASE(X) } size_t _handler_##X(Frame * frame, Frame * global_frame) { uint16_t op = X; repanic(frame->pc);
-    #define END_CASE() PC_INC(); __attribute__((musttail)) return ops[op & 0xFF](frame, global_frame);
+    #define MARK_CASE(X) } __attribute__((preserve_none)) static size_t _handler_##X(size_t * _ops, Frame * frame, Frame * global_frame) { uint16_t op = X; repanic(frame->pc); handler * ops = (handler *)_ops;
+    #define END_CASE() PC_INC(); __attribute__((musttail)) return ops[op & 0xFF](_ops, frame, global_frame);
     #define DECAULT_CASE()
     
-    #define DISPATCH_IMMEDIATELY() op = prog.code[frame->pc]; __attribute__((musttail)) return ops[op & 0xFF](frame, global_frame);
+    #define DISPATCH_IMMEDIATELY() op = prog.code[frame->pc]; __attribute__((musttail)) return ops[op & 0xFF](_ops, frame, global_frame);
 #else
     
     // This, on the other hand, is a conventional loop-over-switch-statement interpreter dispatch system.
