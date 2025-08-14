@@ -18,6 +18,7 @@
 #define MICROARENA
 #include "microarena.h"
 #define malloc(X) ma_malloc(X)
+#define realloc(X, Y) ma_realloc(X, Y)
 #define free(X)
 #endif
 
