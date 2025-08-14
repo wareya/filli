@@ -388,11 +388,10 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
         
         memcpy(cs->caps_reg, caps_reg_next, sizeof(uint16_t) * IDENTIFIER_COUNT);
         size_t r = compile_lambda(source, tokens, count, i, caps, j);
+        assert2(0, r != 0, "Lambda body is invalid");
         
         compile_func_end();
-        cs->locals_n = prev_locals_n ;
-        
-        assert2(0, r != 0, "Lambda body is invalid");
+        cs->locals_n = prev_locals_n;
         
         return i + r - orig_i;
     }
@@ -770,9 +769,9 @@ size_t compile_register_func(const char * source, Token * tokens, size_t count, 
     
     i += compile_statementlist(source, tokens, count, i);
     prog_write(INST_RETURN_VOID);
-    assert2(0, tokens[i++].kind == -11, "Expected 'end'");
-    assert(cs->stackpos[cs->func_depth] == 0);
     cs->func_depth--;
+    assert2(0, tokens[i++].kind == -11, "Expected 'end'");
+    assert(cs->stackpos[cs->func_depth + 1] == 0);
     return i - orig_i;
 }
 
@@ -786,7 +785,8 @@ size_t compile_func(const char * source, Token * tokens, size_t count, size_t i)
     prog_write3(INST_FUNCDEF, 0, 0);
     size_t len_offs = prog.i - 2;
     
-    i += compile_register_func(source, tokens, count, id, i);
+    size_t r = compile_register_func(source, tokens, count, id, i);
+    if (!r) return 0; i += r;
     
     memcpy(prog.code + len_offs, &prog.i, 4);
     
@@ -802,7 +802,8 @@ size_t compile_lambda(const char * source, Token * tokens, size_t count, size_t 
     size_t id_offs = prog.i - 5;
     memcpy(prog.code + id_offs, &id, 4);
     
-    i += compile_register_func(source, tokens, count, id, i);
+    size_t r = compile_register_func(source, tokens, count, id, i);
+    if (!r) return 0; i += r;
     
     cs->funcs_reg[id].caps = caps;
     cs->funcs_reg[id].cap_count = caps_count;
@@ -822,19 +823,14 @@ size_t compile(const char * source, Token * tokens, size_t count, size_t i)
             cs->locals_n = 0;
             compile_func_start();
             r = compile_func(source, tokens, count, i+1);
-            compile_func_end();
-            
             assert2(0, r != 0, "Incomplete function");
+            compile_func_end();
             i += r + 1;
         }
-        else if ((r = compile_statement(source, tokens, count, i)))
-            i += r;
+        else if ((r = compile_statement(source, tokens, count, i))) i += r;
         else
         {
-            prints("AT: ");
-            printsn(source + tokens[i].i, tokens[i].len);
-            prints("\n");
-            panic2(0, "Expected function or statement");
+            prints("AT: "); printsn(source + tokens[i].i, tokens[i].len); prints("\n"); panic2(0, "Expected function or statement");
             break;
         }
     }
