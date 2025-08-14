@@ -50,15 +50,17 @@ neptune[6] = 5.15138902046611451 / 100000.0 * SOLAR_MASS
 let bodies = [sun, jupiter, saturn, uranus, neptune]
 
 func advance(N, bodies, dt):
+  let numbodies = len(bodies)
   for i2 in N:
-    for i in len(bodies):
+    for i in numbodies:
       let bi = bodies[i]
       let bix = bi[0]
       let biy = bi[1]
       let biz = bi[2]
       let bimass = bi[6]
-      for j in len(bodies) - i - 1:
-        let bj = bodies[j + i + 1]
+      let i1 = i + 1
+      for j in numbodies - i - 1:
+        let bj = bodies[j + i1]
         let dx = bix-bj[0]
         let dy = biy-bj[1]
         let dz = biz-bj[2]
@@ -118,7 +120,7 @@ func offsetMomentum(b):
   b[0][5] = pz * -1.0 / SOLAR_MASS
 end
 
-let N = 100000
+let N = 1000000
 
 offsetMomentum(bodies)
 print(energy(bodies))

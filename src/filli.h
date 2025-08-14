@@ -853,6 +853,8 @@ enum { VALUE_NULL, VALUE_INVALID, VALUE_FLOAT, VALUE_ARRAY, VALUE_DICT, VALUE_ST
 
 typedef struct _Value {
     union { double f; Array * a; Dict * d; char ** s; Funcdef * fn; struct _FState * fs; } u;
+    // suppress 128-bit copy optimizations; they kill store-load forwarding on current hardware
+    uint32_t _unused_opt_killer;
     uint8_t tag;
 } Value;
 typedef struct _BiValue { struct _Value l; struct _Value r; } BiValue;
@@ -947,6 +949,9 @@ uint8_t val_truthy(Value v)
     return 0;
 }
 
+    // deliberately do not store _unused_opt_killer, to suppress bad optimizations
+__attribute__((always_inline)) static inline void value_store(Value * p, Value v) { p->tag = v.tag; p->u = v.u; }
+
 typedef struct _LoopPair { uint64_t l; uint64_t r; } LoopPair;
 
 typedef struct _Frame {
@@ -1033,7 +1038,7 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_FUNCDEF)     READ_AND_GOTO_TARGET(1)
         
         #define PROG_IDX(X) code[pc + (X)]
-        #define STACK_PUSH(X, Y) { frame->stack[PROG_IDX(X)] = (Y); }
+        #define STACK_PUSH(X, Y) { value_store(&frame->stack[PROG_IDX(X)], (Y)); }
         
         NEXT_CASE(INST_ARRAY_LITERAL)
             uint16_t itemcount = PROG_IDX(1);
@@ -1073,7 +1078,7 @@ size_t interpret(size_t from_pc)
             ENTER_FUNC(PROG_IDX(2) + 1, PROG_IDX(2), v_func.tag == VALUE_FUNC ? 0 : v_func.u.fs->frame)
         
         #define RETURN_WITH(X) if (!frame->return_to) { PC_INC(); return frame->pc; }\
-            Value retval = (X); frame = frame->return_to; pc = frame->pc; frame->stack[frame->return_slot] = retval; DISPATCH_IMMEDIATELY();
+            Value retval = (X); frame = frame->return_to; pc = frame->pc; value_store(&frame->stack[frame->return_slot], retval); DISPATCH_IMMEDIATELY();
         
         NEXT_CASE(INST_YIELD)
             if (!frame->return_to) panic2(0, "Attempted to yield from not inside of a function");
@@ -1108,14 +1113,14 @@ size_t interpret(size_t from_pc)
             
         NEXT_CASE(INST_SET_GLOBAL)
             Value v2 = frame->stack[PROG_IDX(2)];
-            global_frame->vars[PROG_IDX(1)] = v2;
+            value_store(&global_frame->vars[PROG_IDX(1)], v2);
             Value * v = &frame->vars[PROG_IDX(1)];
             if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; }
         
         NEXT_CASE(PUSH_CAP)    STACK_PUSH(2, *frame->caps[PROG_IDX(1)])
         NEXT_CASE(INST_SET_CAP)
             Value v2 = frame->stack[PROG_IDX(2)];
-            *frame->caps[PROG_IDX(1)] = v2;
+            value_store(frame->caps[PROG_IDX(1)], v2);
             Value * v = &frame->vars[PROG_IDX(1)];
             if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; }
         
@@ -1124,7 +1129,7 @@ size_t interpret(size_t from_pc)
             uint16_t id = PROG_IDX(1);\
             Value v1 = global_frame->vars[id];\
             assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
-            global_frame->vars[id] = val_float(v1.u.f X v2.u.f);
+            value_store(&global_frame->vars[id], val_float(v1.u.f X v2.u.f));
         
         NEXT_CASE(INST_SET_GLOBAL_ADD)    GLOBAL_MATH_SHARED(+)
         NEXT_CASE(INST_SET_GLOBAL_SUB)    GLOBAL_MATH_SHARED(-)
@@ -1136,7 +1141,7 @@ size_t interpret(size_t from_pc)
             uint16_t id = PROG_IDX(1);\
             Value v1 = *frame->caps[id];\
             assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
-            *frame->caps[id] = val_float(v1.u.f X v2.u.f);
+            value_store(frame->caps[id], val_float(v1.u.f X v2.u.f));
         
         #define BIN_STACKPOP(IDX)\
             Value v1 = frame->stack[PROG_IDX(IDX)];\
@@ -1150,8 +1155,8 @@ size_t interpret(size_t from_pc)
         #define MATH_SHARED(X) BIN_STACKPOP(1)\
             /*assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");*/\
             if (v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT)\
-                frame->stack[PROG_IDX(1)] = val_float(v1.u.f X v2.u.f);\
-            else frame->stack[PROG_IDX(1)] = val_float(0.0);
+                value_store(&frame->stack[PROG_IDX(1)], val_float(v1.u.f X v2.u.f));\
+            else value_store(&frame->stack[PROG_IDX(1)], val_float(0.0));
         
         NEXT_CASE(INST_ADD)    MATH_SHARED(+)
         NEXT_CASE(INST_SUB)    MATH_SHARED(-)
@@ -1160,7 +1165,7 @@ size_t interpret(size_t from_pc)
         
         #define MATH_SHARED_BOOL(X) BIN_STACKPOP(1)\
             assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Boolean comparison only works on numbers");\
-            frame->stack[PROG_IDX(1)] = val_float(X);
+            value_store(&frame->stack[PROG_IDX(1)], val_float(X));
         
         NEXT_CASE(INST_CMP_AND)    MATH_SHARED_BOOL(!!(v1.u.f) && !!(v2.u.f))
         NEXT_CASE(INST_CMP_OR)     MATH_SHARED_BOOL(!!(v1.u.f) || !!(v2.u.f))
@@ -1170,7 +1175,7 @@ size_t interpret(size_t from_pc)
             uint16_t id = PROG_IDX(1);\
             Value v1 = frame->vars[id];\
             assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
-            frame->vars[id] = val_float(v1.u.f X v2.u.f);
+            value_store(&frame->vars[id], val_float(v1.u.f X v2.u.f));
         
         NEXT_CASE(INST_SET_ADD)    LOCAL_MATH_SHARED(+)
         NEXT_CASE(INST_SET_SUB)    LOCAL_MATH_SHARED(-)
@@ -1182,7 +1187,7 @@ size_t interpret(size_t from_pc)
             Value * v1p = frame->set_tgt_agg;\
             assert2(0, v1p && v2.tag == VALUE_FLOAT && v1p->tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
             frame->set_tgt_agg = 0;\
-            *v1p = val_float(v1p->u.f X v2.u.f);
+            value_store(v1p, val_float(v1p->u.f X v2.u.f));
         
         NEXT_CASE(INST_SET_LOC_ADD)    ADDR_MATH_SHARED(+)
         NEXT_CASE(INST_SET_LOC_SUB)    ADDR_MATH_SHARED(-)
@@ -1191,7 +1196,7 @@ size_t interpret(size_t from_pc)
         
         #define EQ_SHARED(X) BIN_STACKPOP(1)\
             int8_t equality = val_cmp(v1, v2);\
-            frame->stack[PROG_IDX(1)] = val_float(X);
+            value_store(&frame->stack[PROG_IDX(1)], val_float(X));
         
         NEXT_CASE(INST_CMP_EQ)    EQ_SHARED(equality == 0)
         NEXT_CASE(INST_CMP_NE)    EQ_SHARED(equality != 0)
@@ -1213,7 +1218,7 @@ size_t interpret(size_t from_pc)
             uint16_t id = PROG_IDX(1);
             uint16_t idx = PROG_IDX(2);
             frame->forloops[idx].l += 1;
-            frame->vars[id].u.f = frame->forloops[idx].l;
+            value_store(&frame->vars[id], val_float(frame->forloops[idx].l));
             if (frame->forloops[idx].l < frame->forloops[idx].r) READ_AND_GOTO_TARGET(3)
         
         NEXT_CASE(INST_JMP)    READ_AND_GOTO_TARGET(1)
@@ -1226,13 +1231,13 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(PUSH_FUNCNAME)    STACK_PUSH(2, val_func(PROG_IDX(1)))
         
         NEXT_CASE(INST_SET)
-            frame->vars[PROG_IDX(1)] = frame->stack[PROG_IDX(2)];
+            value_store(&frame->vars[PROG_IDX(1)], frame->stack[PROG_IDX(2)]);
             Value * v = &frame->vars[PROG_IDX(1)];
             if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; }
         
         NEXT_CASE(INST_SET_LOC)
             Value v2 = frame->stack[PROG_IDX(1)];
-            if (frame->set_tgt_agg) { *frame->set_tgt_agg = v2; frame->set_tgt_agg = 0; }
+            if (frame->set_tgt_agg) { value_store(frame->set_tgt_agg, v2); frame->set_tgt_agg = 0; }
             else { assert2(0, frame->set_tgt_char && v2.tag == VALUE_STRING, "Invalid assignment.");
                 *frame->set_tgt_char = **v2.u.s; frame->set_tgt_char = 0; }
         
