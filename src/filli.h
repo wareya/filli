@@ -989,7 +989,6 @@ static handler ops[0x100] = {};
 uint32_t fi_mem_read_u32(void * from) { uint32_t n; memcpy(&n, from, 4); return n; }
 double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
 
-size_t _to_pc = 0;
 size_t interpret(size_t from_pc)
 {
     Frame * frame = (Frame *)zalloc(sizeof(Frame));
@@ -1018,7 +1017,7 @@ size_t interpret(size_t from_pc)
     
     #define PC_INC() frame->pc += op >> 8; pc = frame->pc; op = code[pc];
     
-    #define MARK_CASE(X) }  static size_t _handler_##X(Program * prog, void * _ops, size_t pc, uint16_t * code, Frame * frame, Frame * global_frame) { uint16_t op = X; repanic(frame->pc); handler * ops = (handler *)_ops; _to_pc = frame->pc;
+    #define MARK_CASE(X) }  static size_t _handler_##X(Program * prog, void * _ops, size_t pc, uint16_t * code, Frame * frame, Frame * global_frame) { uint16_t op = X; repanic(frame->pc); handler * ops = (handler *)_ops;
     #define END_CASE() PC_INC(); __attribute__((musttail)) return ops[op & 0xFF](prog, _ops, pc, code, frame, global_frame);
     #define DECAULT_CASE()
     

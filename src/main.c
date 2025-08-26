@@ -85,7 +85,6 @@ int main(int argc, char ** argv)
         fputs(filli_err, stdout);
         fputs("\n", stdout);
         prints("At ");
-        prints(baddtostr(_to_pc));
         fputs("\n", stdout);
     }
     
