@@ -682,8 +682,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         prog_write3(INST_JMP, 0, 0);
         if (token_is(source, tokens, count, i, "continue"))
             cs->loop_conts[cs->loop_cont_i++] = prog.i - 2;
-        else
-            cs->loop_breaks[cs->loop_break_i++] = prog.i - 2;
+        else { cs->loop_breaks[cs->loop_break_i++] = prog.i - 2; }
         return 1;
     }
     else if (token_is(source, tokens, count, i, "return"))
@@ -900,8 +899,7 @@ uint64_t val_hash(Value * v)
 {
     assert2(0, v->tag == VALUE_STRING || v->tag == VALUE_FLOAT || v->tag == VALUE_FUNC || v->tag == VALUE_NULL,
            "Tried to use an unhashable type (dict or array) as a dict key");
-    uint64_t hash = 0;
-    uint64_t hv = 0xf6f1029eab913ac5;
+    uint64_t hash = 0; uint64_t hv = 0xf6f1029eab913ac5;
     
     hash = (hash + v->tag) * hv;
     if (v->tag == VALUE_FLOAT)  hash = (hash + double_bits_safe(v->u.f)) * hv;
