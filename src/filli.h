@@ -776,8 +776,7 @@ size_t compile_register_func(const char * source, Token * tokens, size_t count, 
     assert2(0, tokens[i++].kind == -11, "Expected 'end'");
     assert(cs->stackpos[cs->func_depth + 1] == 0);
     
-    if (closure_count == closure_count_start)
-        cs->funcs_reg[id].poolsafe = 1;
+    if (closure_count == closure_count_start) cs->funcs_reg[id].poolsafe = 1;
     
     return i - orig_i;
 }
@@ -1063,13 +1062,8 @@ size_t interpret(size_t from_pc)
             assert2(0, fn->exists, "Function does not exist");\
             if (!fn->intrinsic) {\
                 PC_INC(); Frame * prev = frame;\
-                Frame * next = (FORCED) ? (FORCED) : \
-                    (fn->poolsafe && framepool) ? framepoolpop() : (Frame *)zalloc(sizeof(Frame));\
-                next->fn = fn;\
-                next->return_to = frame;\
-                frame->return_slot = return_slot;\
-                frame = next;\
-                pc = frame->pc;\
+                Frame * next = (FORCED) ? (FORCED) : (fn->poolsafe && framepool) ? framepoolpop() : (Frame *)zalloc(sizeof(Frame));\
+                next->fn = fn; next->return_to = frame; frame->return_slot = return_slot; frame = next; pc = frame->pc;\
                 assert2(0, argcount == fn->argcount, "Function arg count doesn't match");\
                 if (!(FORCED)) for (size_t i = 0; i < fn->argcount; i++) {\
                     frame->vars[i] = prev->stack[idx + i]; Value * v = &frame->vars[i];\
@@ -1146,10 +1140,8 @@ size_t interpret(size_t from_pc)
             assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
             value_store(&global_frame->vars[id], val_float(v1.u.f X v2.u.f));
         
-        NEXT_CASE(INST_SET_GLOBAL_ADD)    GLOBAL_MATH_SHARED(+)
-        NEXT_CASE(INST_SET_GLOBAL_SUB)    GLOBAL_MATH_SHARED(-)
-        NEXT_CASE(INST_SET_GLOBAL_MUL)    GLOBAL_MATH_SHARED(*)
-        NEXT_CASE(INST_SET_GLOBAL_DIV)    GLOBAL_MATH_SHARED(/)
+        NEXT_CASE(INST_SET_GLOBAL_ADD)    GLOBAL_MATH_SHARED(+)    NEXT_CASE(INST_SET_GLOBAL_SUB)    GLOBAL_MATH_SHARED(-)
+        NEXT_CASE(INST_SET_GLOBAL_MUL)    GLOBAL_MATH_SHARED(*)    NEXT_CASE(INST_SET_GLOBAL_DIV)    GLOBAL_MATH_SHARED(/)
         
         #define CAP_MATH_SHARED(X)\
             Value v2 = frame->stack[PROG_IDX(2)];\
@@ -1162,10 +1154,8 @@ size_t interpret(size_t from_pc)
             Value v1 = frame->stack[PROG_IDX(IDX)];\
             Value v2 = frame->stack[PROG_IDX(IDX) + 1];
         
-        NEXT_CASE(INST_SET_CAP_ADD)    CAP_MATH_SHARED(+)
-        NEXT_CASE(INST_SET_CAP_SUB)    CAP_MATH_SHARED(-)
-        NEXT_CASE(INST_SET_CAP_MUL)    CAP_MATH_SHARED(*)
-        NEXT_CASE(INST_SET_CAP_DIV)    CAP_MATH_SHARED(/)
+        NEXT_CASE(INST_SET_CAP_ADD)    CAP_MATH_SHARED(+)    NEXT_CASE(INST_SET_CAP_SUB)    CAP_MATH_SHARED(-)
+        NEXT_CASE(INST_SET_CAP_MUL)    CAP_MATH_SHARED(*)    NEXT_CASE(INST_SET_CAP_DIV)    CAP_MATH_SHARED(/)
         
         #define MATH_SHARED(C, X) BIN_STACKPOP(1)\
             /*assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");*/\
@@ -1173,10 +1163,8 @@ size_t interpret(size_t from_pc)
                 value_store(&frame->stack[PROG_IDX(1)], val_float(C v1.u.f X C v2.u.f));\
             else value_store(&frame->stack[PROG_IDX(1)], val_float(0.0));
         
-        NEXT_CASE(INST_ADD)    MATH_SHARED(, +)
-        NEXT_CASE(INST_SUB)    MATH_SHARED(, -)
-        NEXT_CASE(INST_MUL)    MATH_SHARED(, *)
-        NEXT_CASE(INST_DIV)    MATH_SHARED(, /)
+        NEXT_CASE(INST_ADD)    MATH_SHARED(, +)    NEXT_CASE(INST_SUB)    MATH_SHARED(, -)
+        NEXT_CASE(INST_MUL)    MATH_SHARED(, *)    NEXT_CASE(INST_DIV)    MATH_SHARED(, /)
         NEXT_CASE(INST_BITAND)    MATH_SHARED((unsigned int), &)
         NEXT_CASE(INST_BITOR)     MATH_SHARED((unsigned int), |)
         NEXT_CASE(INST_BITXOR)    MATH_SHARED((unsigned int), ^)
@@ -1196,10 +1184,8 @@ size_t interpret(size_t from_pc)
             assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
             value_store(&frame->vars[id], val_float(v1.u.f X v2.u.f));
         
-        NEXT_CASE(INST_SET_ADD)    LOCAL_MATH_SHARED(+)
-        NEXT_CASE(INST_SET_SUB)    LOCAL_MATH_SHARED(-)
-        NEXT_CASE(INST_SET_MUL)    LOCAL_MATH_SHARED(*)
-        NEXT_CASE(INST_SET_DIV)    LOCAL_MATH_SHARED(/)
+        NEXT_CASE(INST_SET_ADD)    LOCAL_MATH_SHARED(+)    NEXT_CASE(INST_SET_SUB)    LOCAL_MATH_SHARED(-)
+        NEXT_CASE(INST_SET_MUL)    LOCAL_MATH_SHARED(*)    NEXT_CASE(INST_SET_DIV)    LOCAL_MATH_SHARED(/)
             
         #define ADDR_MATH_SHARED(X)\
             Value v2 = frame->stack[PROG_IDX(1)];\
@@ -1208,21 +1194,17 @@ size_t interpret(size_t from_pc)
             frame->set_tgt_agg = 0;\
             value_store(v1p, val_float(v1p->u.f X v2.u.f));
         
-        NEXT_CASE(INST_SET_LOC_ADD)    ADDR_MATH_SHARED(+)
-        NEXT_CASE(INST_SET_LOC_SUB)    ADDR_MATH_SHARED(-)
-        NEXT_CASE(INST_SET_LOC_MUL)    ADDR_MATH_SHARED(*)
-        NEXT_CASE(INST_SET_LOC_DIV)    ADDR_MATH_SHARED(/)
+        NEXT_CASE(INST_SET_LOC_ADD)    ADDR_MATH_SHARED(+)    NEXT_CASE(INST_SET_LOC_SUB)    ADDR_MATH_SHARED(-)
+        NEXT_CASE(INST_SET_LOC_MUL)    ADDR_MATH_SHARED(*)    NEXT_CASE(INST_SET_LOC_DIV)    ADDR_MATH_SHARED(/)
         
         #define EQ_SHARED(X) BIN_STACKPOP(1)\
             int8_t equality = val_cmp(v1, v2);\
             value_store(&frame->stack[PROG_IDX(1)], val_float(X));
         
-        NEXT_CASE(INST_CMP_EQ)    EQ_SHARED(equality == 0)
-        NEXT_CASE(INST_CMP_NE)    EQ_SHARED(equality != 0)
+        NEXT_CASE(INST_CMP_EQ)    EQ_SHARED(equality == 0)    NEXT_CASE(INST_CMP_NE)    EQ_SHARED(equality != 0)
         NEXT_CASE(INST_CMP_LE)    EQ_SHARED(equality == 0 || equality == -1)
         NEXT_CASE(INST_CMP_GE)    EQ_SHARED(equality == 0 || equality == 1)
-        NEXT_CASE(INST_CMP_LT)    EQ_SHARED(equality == -1)
-        NEXT_CASE(INST_CMP_GT)    EQ_SHARED(equality == 1)
+        NEXT_CASE(INST_CMP_LT)    EQ_SHARED(equality == -1)    NEXT_CASE(INST_CMP_GT)    EQ_SHARED(equality == 1)
         
         NEXT_CASE(INST_FORSTART)
             Value v = frame->stack[PROG_IDX(5)];
