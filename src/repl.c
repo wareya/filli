@@ -46,6 +46,8 @@ int main(void)
         else
             fputs("  > ", stdout);
         
+        fflush(stdout);
+        
         char * s = fgets(cursor, MAX_INPUT_LEN, stdin);
         if (s == 0) { return 0; }
         
@@ -54,6 +56,7 @@ int main(void)
         
         size_t count = 0;
         
+        fflush(stdout);
         if (cursor[0] == '\n' || cursor[0] == '\0')
         {
             cursor = input;

@@ -7,6 +7,8 @@ uint16_t len_id;
 uint16_t keys_id;
 uint16_t array_insert_id;
 uint16_t array_remove_id;
+uint16_t array_allocate_id;
+uint16_t array_clone_into_id;
 uint16_t dict_remove_id;
 uint16_t truthy_id;
 uint16_t not_id;
@@ -117,7 +119,7 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame, size_t s
                 v.u.a->cap *= 2;
                 if (v.u.a->cap < 4) v.u.a->cap = 4;
                 Value * re = (Value *)zalloc(sizeof(Value) * v.u.a->cap);
-                memcpy(re, v.u.a->buf, oldcap);
+                memcpy(re, v.u.a->buf, oldcap * sizeof(Value));
                 v.u.a->buf = re;
             }
             for (size_t i = v.u.a->len; i > index; i--)
@@ -125,6 +127,41 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame, size_t s
             v.u.a->buf[index] = v3;
             v.u.a->len += 1;
             STACK_PUSH2(v2)
+        }
+        else panic2(,"Tried to use array_insert_id() on a non-dictionary");
+    }
+    else if (id == array_allocate_id)
+    {
+        assert2(, argcount == 3, "Wrong number of arguments to function");
+        Value v = frame->stack[stackpos];
+        Value v2 = frame->stack[stackpos + 1];
+        Value v3 = frame->stack[stackpos + 2];
+        if (v.tag == VALUE_ARRAY)
+        {
+            assert2(, v2.tag == VALUE_FLOAT, "Array indexes must be numbers");
+            size_t len = v2.u.f;
+            v.u.a->cap = len;
+            v.u.a->len = len;
+            if (v.u.a->cap < 4) v.u.a->cap = 4;
+            v.u.a->buf = (Value *)zalloc(sizeof(Value) * v.u.a->cap);
+            for (size_t i = 0; i < len; i++)
+                v.u.a->buf[i] = v3;
+            STACK_PUSH2(v)
+        }
+        else panic2(,"Tried to use array_insert_id() on a non-dictionary");
+    }
+    else if (id == array_clone_into_id)
+    {
+        assert2(, argcount == 2, "Wrong number of arguments to function");
+        Value v = frame->stack[stackpos];
+        Value v2 = frame->stack[stackpos + 1];
+        if (v.tag == VALUE_ARRAY && v2.tag == VALUE_ARRAY)
+        {
+            v.u.a->buf = (Value *)zalloc(sizeof(Value) * v2.u.a->cap);
+            memcpy(v.u.a->buf, v2.u.a->buf, sizeof(Value) * v2.u.a->cap);
+            v.u.a->len = v2.u.a->len;
+            v.u.a->cap = v2.u.a->cap;
+            STACK_PUSH2(v)
         }
         else panic2(,"Tried to use array_insert_id() on a non-dictionary");
     }
@@ -138,12 +175,6 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame, size_t s
             assert2(, v2.tag == VALUE_FLOAT, "Array indexes must be numbers");
             size_t index = v2.u.f;
             assert2(, index < v.u.a->len, "Array index out of range");
-            if (v.u.a->len + 1 >= v.u.a->cap)
-            {
-                v.u.a->cap *= 2;
-                Value * re = (Value *)zalloc(sizeof(Value) * v.u.a->cap);
-                memcpy(re, v.u.a->buf, v.u.a->cap / 2);
-            }
             Value v3 = v.u.a->buf[index];
             for (size_t i = index; i < v.u.a->len - 1; i++)
                 v.u.a->buf[i] = v.u.a->buf[i + 1];
@@ -182,6 +213,8 @@ void register_intrinsic_funcs(void)
     REGISTER(keys)
     REGISTER(array_insert)
     REGISTER(array_remove)
+    REGISTER(array_allocate)
+    REGISTER(array_clone_into)
     REGISTER(dict_remove)
     REGISTER(truthy)
     REGISTER(not)

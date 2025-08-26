@@ -84,6 +84,9 @@ int main(int argc, char ** argv)
         fputs("Interpreter produced error:\n", stdout);
         fputs(filli_err, stdout);
         fputs("\n", stdout);
+        prints("At ");
+        prints(baddtostr(_to_pc));
+        fputs("\n", stdout);
     }
     
     #ifdef MICROARENA

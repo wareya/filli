@@ -1,0 +1,122 @@
+#let size = 20
+#let size = 4002
+#let size = 8
+#let size = 500
+let size = 404
+let seed = 8381853
+
+func lcg():
+    seed = ((seed + 1) * 14185315) & 268435455
+    return seed
+end
+
+func generate_grid(grid, size):
+    for i in size * size:
+        grid[i] = lcg() > 80760371
+    end
+
+    grid[size * 2 - 2] = 1
+    grid[size * (size - 2) + 1] = 1
+    let q = size
+    for n in q:
+        grid[n * size] = 0
+        grid[n * size + size - 1] = 0
+        grid[n] = 0
+        grid[n + size * (size - 1)] = 0
+    end
+end
+
+func get_neighbors(index, size):
+    return [ \
+        index - 1, \
+        index + 1, \
+        index - size, \
+        index + size \
+    ]
+end
+
+func pushraw(heap, val):
+    if len(heap) == 0:
+        array_clone_into(heap, val)
+    elif heap[0] > val[0]:
+        for i in 5:
+            let temp = heap[i]
+            heap[i] = val[i]
+            val[i] = temp
+        end
+        pushraw(heap, val)
+    else:
+        heap[4] = (heap[4] + 1) & 1
+        pushraw(heap[2 + heap[4]], val)
+    end
+end
+
+func push(heap, val):
+    pushraw(heap, [val[0], val[1], [], [], 0])
+end
+
+func pop(heap):
+    let r1 = heap[0]
+    let r2 = heap[1]
+    if len(heap[3]):
+        pushraw(heap[2], heap[3])
+    end
+    let h = heap[2]
+    array_clone_into(heap, h)
+    return [r1, r2]
+end
+
+func dijkstra(grid, size):
+    let start = size * (size - 2) + 1
+    let end_ = size * 2 - 2
+
+    let distances = []
+    for i in size * size:
+        array_insert(distances, i, 1/0)
+    end
+    distances[start] = 0
+    let heap = []
+    push(heap, [0, start])
+    
+    while len(heap):
+        let asdf = pop(heap)
+        let current_distance = asdf[0]
+        let current_index = asdf[1]
+
+        if current_index == end_:
+            return current_distance
+        end
+
+        if current_distance > distances[current_index]:
+            continue
+        end
+
+        let neighbors = get_neighbors(current_index, size)
+        for i in 4:
+            let neighbor = neighbors[i]
+            if grid[neighbor] == 0:
+                continue
+            end
+            let new_dist = current_distance + 1
+
+            if new_dist < distances[neighbor]:
+                distances[neighbor] = new_dist
+                push(heap, [new_dist, neighbor])
+            end
+        end
+    end
+
+    return -1
+end
+
+func main():
+    let grid = []
+    array_allocate(grid, size * size, 0)
+    generate_grid(grid, size)
+    #print(table.concat(grid, " "))
+
+    let shortest_path_cost = dijkstra(grid, size)
+    print("Shortest path cost from bottom-left to top-right:", shortest_path_cost)
+end
+
+main()
