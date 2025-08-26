@@ -240,6 +240,7 @@ typedef struct _Funcdef {
     uint32_t loc;
     int16_t * caps;
     struct _Value ** cap_data;
+    uint16_t vars_len;
 } Funcdef;
 
 typedef struct _CompilerData {
@@ -761,7 +762,7 @@ size_t compile_register_func(const char * source, Token * tokens, size_t count, 
     )
     if (!token_is(source, tokens, count, i++, ":")) panic2(0, "Invalid funcdef");
     
-    cs->funcs_reg[id] = FI_LIT(Funcdef) {1, 0, 0, (uint16_t)j, id, 0, 0, prog.i, 0, 0};
+    cs->funcs_reg[id] = FI_LIT(Funcdef) {1, 0, 0, (uint16_t)j, id, 0, 0, prog.i, 0, 0, 0};
     if (j > 0)
     {
         cs->funcs_reg[id].args = (uint16_t *)zalloc(sizeof(uint16_t)*j);
@@ -777,6 +778,7 @@ size_t compile_register_func(const char * source, Token * tokens, size_t count, 
     assert(cs->stackpos[cs->func_depth + 1] == 0);
     
     if (closure_count == closure_count_start) cs->funcs_reg[id].poolsafe = 1;
+    cs->funcs_reg[id].vars_len = cs->locals_n;
     
     return i - orig_i;
 }
@@ -975,7 +977,7 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame, size_t s
 
 Frame * framepool = 0;
 Frame * framepoolpop(void) { Frame * ret = framepool; framepool = framepool->return_to; ret->return_to = 0; return ret; }
-void framepoolpush(Frame * frame) { memset(frame, 0, sizeof(Frame)); frame->return_to = framepool; framepool = frame; }
+void framepoolpush(Frame * frame) { memset(frame, 0, 32); memset(frame->vars, 0, frame->fn->vars_len * sizeof(Value)); frame->return_to = framepool; framepool = frame; }
 
 #if USE_TAIL_DISPATCH
 #define INSTX(X)  static size_t _handler_##X(Program * prog, void * _ops, size_t pc, uint16_t * code, Frame *, Frame *);
@@ -1282,7 +1284,7 @@ size_t interpret(size_t from_pc)
 void register_intrinsic_func(const char * s)
 {
     int16_t id = lex_ident_offset - insert_or_lookup_id(s, strlen(s));
-    cs->funcs_reg[id] = FI_LIT(Funcdef) {1, 1, 0, 0, (uint16_t)id, 0, 0, prog.i, 0, 0};
+    cs->funcs_reg[id] = FI_LIT(Funcdef) {1, 1, 0, 0, (uint16_t)id, 0, 0, prog.i, 0, 0, 0};
 }
 
 #include "intrinsics.h"

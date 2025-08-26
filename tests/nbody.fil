@@ -49,37 +49,35 @@ neptune[6] = 5.15138902046611451 / 100000.0 * SOLAR_MASS
 
 let bodies = [sun, jupiter, saturn, uranus, neptune]
 
-func advance(N, bodies, dt):
+func advance(bodies, dt):
   let numbodies = len(bodies)
-  for i2 in N:
-    for i in numbodies:
-      let bi = bodies[i]
-      let bix = bi[0]
-      let biy = bi[1]
-      let biz = bi[2]
-      let bimass = bi[6]
-      let i1 = i + 1
-      for j in numbodies - i - 1:
-        let bj = bodies[j + i1]
-        let dx = bix-bj[0]
-        let dy = biy-bj[1]
-        let dz = biz-bj[2]
-        let dist2 = dx*dx + dy*dy + dz*dz
-        let mag = sqrt(dist2)
-        mag = dt / (mag * dist2)
-        let bm = bj[6]*mag
-        bi[3] -= (dx * bm)
-        bi[4] -= (dy * bm)
-        bi[5] -= (dz * bm)
-        bm = bimass*mag
-        bj[3] += (dx * bm)
-        bj[4] += (dy * bm)
-        bj[5] += (dz * bm)
-      end
-      bi[0] += dt * bi[3]
-      bi[1] += dt * bi[4]
-      bi[2] += dt * bi[5]
+  for i in numbodies:
+    let bi = bodies[i]
+    let bix = bi[0]
+    let biy = bi[1]
+    let biz = bi[2]
+    let bimass = bi[6]
+    let i1 = i + 1
+    for j in numbodies - i - 1:
+      let bj = bodies[j + i1]
+      let dx = bix-bj[0]
+      let dy = biy-bj[1]
+      let dz = biz-bj[2]
+      let dist2 = dx*dx + dy*dy + dz*dz
+      let mag = sqrt(dist2)
+      mag = dt / (mag * dist2)
+      let bm = bj[6]*mag
+      bi[3] -= (dx * bm)
+      bi[4] -= (dy * bm)
+      bi[5] -= (dz * bm)
+      bm = bimass*mag
+      bj[3] += (dx * bm)
+      bj[4] += (dy * bm)
+      bj[5] += (dz * bm)
     end
+    bi[0] += dt * bi[3]
+    bi[1] += dt * bi[4]
+    bi[2] += dt * bi[5]
   end
 end
 
@@ -124,7 +122,7 @@ let N = 1000000
 
 offsetMomentum(bodies)
 print(energy(bodies))
-#for i in N: advance(bodies, 0.01) end
-advance(N, bodies, 0.01)
+for i in N: advance(bodies, 0.01) end
+#advance(N, bodies, 0.01)
 print(energy(bodies))
 
