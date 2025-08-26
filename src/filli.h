@@ -1156,18 +1156,18 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_SET_CAP_ADD)    CAP_MATH_SHARED(+)    NEXT_CASE(INST_SET_CAP_SUB)    CAP_MATH_SHARED(-)
         NEXT_CASE(INST_SET_CAP_MUL)    CAP_MATH_SHARED(*)    NEXT_CASE(INST_SET_CAP_DIV)    CAP_MATH_SHARED(/)
         
-        #define MATH_SHARED(C, X) BIN_STACKPOP(1)\
+        #define MATH_SHARED(C, C2, X) BIN_STACKPOP(1)\
             /*assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");*/\
             if (v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT)\
-                value_store(&frame->stack[PROG_IDX(1)], val_float(C v1.u.f X C v2.u.f));\
+                value_store(&frame->stack[PROG_IDX(1)], val_float((C v1.u.f) X (C2 v2.u.f)));\
             else value_store(&frame->stack[PROG_IDX(1)], val_float(0.0));
         
-        NEXT_CASE(INST_ADD)    MATH_SHARED(, +)    NEXT_CASE(INST_SUB)    MATH_SHARED(, -)
-        NEXT_CASE(INST_MUL)    MATH_SHARED(, *)    NEXT_CASE(INST_DIV)    MATH_SHARED(, /)
-        NEXT_CASE(INST_BITAND)    MATH_SHARED((unsigned int), &)
-        NEXT_CASE(INST_BITOR)     MATH_SHARED((unsigned int), |)
-        NEXT_CASE(INST_BITXOR)    MATH_SHARED((unsigned int), ^)
-        NEXT_CASE(INST_INTMOD)    MATH_SHARED((long long int), %)
+        NEXT_CASE(INST_ADD)    MATH_SHARED(,, +)    NEXT_CASE(INST_SUB)    MATH_SHARED(,, -)
+        NEXT_CASE(INST_MUL)    MATH_SHARED(,, *)    NEXT_CASE(INST_DIV)    MATH_SHARED(,, /)
+        NEXT_CASE(INST_BITAND)    MATH_SHARED((unsigned int), (unsigned int), &)
+        NEXT_CASE(INST_BITOR)     MATH_SHARED((unsigned int), (unsigned int), |)
+        NEXT_CASE(INST_BITXOR)    MATH_SHARED((unsigned int), (unsigned int), ^)
+        NEXT_CASE(INST_INTMOD)    MATH_SHARED((long long int), ((long long int) v2.u.f) == 0 ? 1 : (long long int), %)
         
         #define MATH_SHARED_BOOL(X) BIN_STACKPOP(1)\
             assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Boolean comparison only works on numbers");\
