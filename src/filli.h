@@ -248,7 +248,7 @@ typedef struct _CompilerData {
     uint16_t globals_reg[IDENTIFIER_COUNT];
     Funcdef funcs_reg[IDENTIFIER_COUNT + LAMBDA_COUNT];
     
-    uint32_t lambda_id, compiled_string_i, locals_reg_i, globals_n, locals_n, caps_reg_i, for_loop_index, func_depth;
+    uint32_t lambda_id, compiled_string_i, locals_reg_i, globals_n, locals_n, caps_reg_i, for_loop_index, func_depth, last_idx;
 
     uint16_t * locals_reg, * caps_reg, * locals_reg_stack[1024], * caps_reg_stack[1024];
     
@@ -259,14 +259,14 @@ CompilerState * cs;
 void compiler_state_init(void)
 {
     cs = (CompilerState *)zalloc(sizeof(CompilerState));
-    *cs = FI_LIT(CompilerState) { {}, {}, {}, IDENTIFIER_COUNT, 0, 0, 0, 0, 0, 0, 0,
+    *cs = FI_LIT(CompilerState) { {}, {}, {}, IDENTIFIER_COUNT, 0, 0, 0, 0, 0, 0, 0, 0,
                                   0, 0, {}, {}, 0, 0, 0, {}, {}, {} };
 }
 
 //#define COMP_SPUSH ( assert(((void)"Stack exceeded limit.", cs->stackpos[cs->func_depth] < 1024)), cs->stackpos[cs->func_depth]++ )
-#define COMP_SPUSH ( assert3(((void)"Stack exceeded limit.", cs->stackpos[cs->func_depth] < 1024)), (cs->stackpos[cs->func_depth] += (cs->stackpos[cs->func_depth] < 1024)) - 1 )
-#define COMP_S cs->stackpos[cs->func_depth]
-#define COMP_SPOP ( assert(cs->stackpos[cs->func_depth] != 0), --cs->stackpos[cs->func_depth] )
+#define COMP_SPUSH ( assert3(((void)"Stack exceeded limit.", cs->stackpos[cs->func_depth] < 1024)), (cs->stackpos[cs->func_depth] += (cs->stackpos[cs->func_depth] < 1024)) + FRAME_VARCOUNT - 1 )
+#define COMP_S (cs->stackpos[cs->func_depth] + FRAME_VARCOUNT)
+#define COMP_SPOP ( assert(cs->stackpos[cs->func_depth] != 0), (--cs->stackpos[cs->func_depth]) + FRAME_VARCOUNT )
 
 // returns number of consumed tokens
 size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t i)
@@ -280,6 +280,7 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
     
     if (tokens[i].kind < 0)
     {
+        cs->last_idx = prog.i;
         uint16_t id = lex_ident_offset - tokens[i].kind;
         if (token_is(source, tokens, count, i, "true"))         return prog_write6(PUSH_NUM, 0, 0, 0, 0x3FF0, COMP_SPUSH), 1;
         else if (token_is(source, tokens, count, i, "false"))   return prog_write6(PUSH_NUM, 0, 0, 0, 0, COMP_SPUSH), 1;
@@ -330,9 +331,7 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
 }
 
 #define PARSE_COMMALIST(END, BREAK, BREAK2, LIMITER, HANDLER)\
-    uint32_t j = 0;\
-    while (!token_is(source, tokens, count, i, END)) {\
-        LIMITER; HANDLER; j += 1;\
+    uint32_t j = 0; while (!token_is(source, tokens, count, i, END)) { LIMITER; HANDLER; j += 1;\
         if (!(token_is(source, tokens, count, i, END) || token_is(source, tokens, count, i, ","))) BREAK;\
         if (token_is(source, tokens, count, i, ",")) i++;\
     } if (!token_is(source, tokens, count, i++, END)) BREAK2;
@@ -963,7 +962,7 @@ typedef struct _Frame {
     struct _Frame * return_to;
     Value * set_tgt_agg;
     char * set_tgt_char;
-    Value vars[FRAME_VARCOUNT], stack[FRAME_STACKSIZE];
+    Value vars[FRAME_VARCOUNT + FRAME_STACKSIZE];
     LoopPair forloops[FORLOOP_COUNT_LIMIT];
     Value ** caps;
     Funcdef * fn;
@@ -1048,12 +1047,13 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_FUNCDEF)     READ_AND_GOTO_TARGET(1)
         
         #define PROG_IDX(X) code[pc + (X)]
-        #define STACK_PUSH(X, Y) { value_store(&frame->stack[PROG_IDX(X)], (Y)); }
+        #define STACK_PUSH(X, Y) { value_store(&frame->vars[PROG_IDX(X)], (Y)); }
+        #define STACK_POP(X, Y) frame->vars[PROG_IDX(X) + (Y)]
         
         NEXT_CASE(INST_ARRAY_LITERAL)
             uint16_t itemcount = PROG_IDX(1);
             Value v = val_array(itemcount);
-            for (size_t i = 0; i < itemcount; i++) v.u.a->buf[i] = frame->stack[PROG_IDX(2) + i];
+            for (size_t i = 0; i < itemcount; i++) v.u.a->buf[i] = STACK_POP(2, i);
             STACK_PUSH(2, v)
         
         #define ENTER_FUNC(IDX, RETURN_SLOT, FORCED)\
@@ -1065,7 +1065,7 @@ size_t interpret(size_t from_pc)
                 next->fn = fn; next->return_to = frame; frame->return_slot = return_slot; frame = next; pc = frame->pc;\
                 assert2(0, argcount == fn->argcount, "Function arg count doesn't match");\
                 if (!(FORCED)) for (size_t i = 0; i < fn->argcount; i++) {\
-                    frame->vars[i] = prev->stack[idx + i]; Value * v = &frame->vars[i];\
+                    frame->vars[i] = prev->vars[idx + i]; Value * v = &frame->vars[i];\
                     if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; } }\
                 if (!(FORCED)) { frame->pc = fn->loc; pc = fn->loc; if (fn->cap_data) frame->caps = fn->cap_data; }\
                 DISPATCH_IMMEDIATELY(); }\
@@ -1078,13 +1078,13 @@ size_t interpret(size_t from_pc)
         
         NEXT_CASE(INST_FUNCCALL_REF)
             uint16_t argcount = PROG_IDX(1);
-            Value v_func = frame->stack[PROG_IDX(2)];
+            Value v_func = STACK_POP(2, 0);
             assert2(0, v_func.tag == VALUE_FUNC || v_func.tag == VALUE_STATE, "Tried to call a non-function");
             Funcdef * fn = v_func.tag == VALUE_FUNC ? v_func.u.fn : v_func.u.fs->fn;
             ENTER_FUNC(PROG_IDX(2) + 1, PROG_IDX(2), v_func.tag == VALUE_FUNC ? 0 : v_func.u.fs->frame)
         
         #define RETURN_WITH(POOLABLE, X) if (!frame->return_to) { PC_INC(); return frame->pc; }\
-            Frame * oldframe = frame; Value retval = (X); frame = frame->return_to; pc = frame->pc; value_store(&frame->stack[frame->return_slot], retval);\
+            Frame * oldframe = frame; Value retval = (X); frame = frame->return_to; pc = frame->pc; value_store(&frame->vars[frame->return_slot], retval);\
             if (POOLABLE && oldframe->fn && oldframe->fn->poolsafe) framepoolpush(oldframe);\
             DISPATCH_IMMEDIATELY();
         
@@ -1093,19 +1093,15 @@ size_t interpret(size_t from_pc)
             
             PC_INC();
             
-            Value v = frame->stack[PROG_IDX(1)];
+            Value v = STACK_POP(1, 0);
             Value v2 = val_array(2);
             v2.u.a->buf[0] = v;
             v2.u.a->buf[1] = val_funcstate(frame->fn, frame);
             
             RETURN_WITH(0, v2);
         
-        NEXT_CASE(INST_RETURN_VAL)
-            RETURN_WITH(1, frame->stack[PROG_IDX(1)]);
-        
-        NEXT_CASE(INST_RETURN_VOID)
-            RETURN_WITH(1, val_tagged(VALUE_NULL));
-        
+        NEXT_CASE(INST_RETURN_VAL)    RETURN_WITH(1, STACK_POP(1, 0));
+        NEXT_CASE(INST_RETURN_VOID)    RETURN_WITH(1, val_tagged(VALUE_NULL));
         NEXT_CASE(PUSH_NULL)    STACK_PUSH(1, val_tagged(VALUE_NULL))
         
         NEXT_CASE(PUSH_DICT_EMPTY)
@@ -1116,24 +1112,23 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(PUSH_NUM)
             STACK_PUSH(5, val_float(fi_mem_read_f64(code + frame->pc + 1)))
         
-        NEXT_CASE(PUSH_GLOBAL)
-        STACK_PUSH(2, global_frame->vars[PROG_IDX(1)])
+        NEXT_CASE(PUSH_GLOBAL)    STACK_PUSH(2, global_frame->vars[PROG_IDX(1)])
             
         NEXT_CASE(INST_SET_GLOBAL)
-            Value v2 = frame->stack[PROG_IDX(2)];
+            Value v2 = STACK_POP(2, 0);
             value_store(&global_frame->vars[PROG_IDX(1)], v2);
             Value * v = &frame->vars[PROG_IDX(1)];
             if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; }
         
         NEXT_CASE(PUSH_CAP)    STACK_PUSH(2, *frame->caps[PROG_IDX(1)])
         NEXT_CASE(INST_SET_CAP)
-            Value v2 = frame->stack[PROG_IDX(2)];
+            Value v2 = STACK_POP(2, 0);
             value_store(frame->caps[PROG_IDX(1)], v2);
             Value * v = &frame->vars[PROG_IDX(1)];
             if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; }
         
         #define GLOBAL_MATH_SHARED(X)\
-            Value v2 = frame->stack[PROG_IDX(2)];\
+            Value v2 = STACK_POP(2, 0);\
             uint16_t id = PROG_IDX(1);\
             Value v1 = global_frame->vars[id];\
             assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
@@ -1143,15 +1138,13 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_SET_GLOBAL_MUL)    GLOBAL_MATH_SHARED(*)    NEXT_CASE(INST_SET_GLOBAL_DIV)    GLOBAL_MATH_SHARED(/)
         
         #define CAP_MATH_SHARED(X)\
-            Value v2 = frame->stack[PROG_IDX(2)];\
+            Value v2 = STACK_POP(2, 0);\
             uint16_t id = PROG_IDX(1);\
             Value v1 = *frame->caps[id];\
             assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
             value_store(frame->caps[id], val_float(v1.u.f X v2.u.f));
         
-        #define BIN_STACKPOP(IDX)\
-            Value v1 = frame->stack[PROG_IDX(IDX)];\
-            Value v2 = frame->stack[PROG_IDX(IDX) + 1];
+        #define BIN_STACKPOP(IDX) Value v1 = STACK_POP(IDX, 0); Value v2 = STACK_POP(IDX, 1);
         
         NEXT_CASE(INST_SET_CAP_ADD)    CAP_MATH_SHARED(+)    NEXT_CASE(INST_SET_CAP_SUB)    CAP_MATH_SHARED(-)
         NEXT_CASE(INST_SET_CAP_MUL)    CAP_MATH_SHARED(*)    NEXT_CASE(INST_SET_CAP_DIV)    CAP_MATH_SHARED(/)
@@ -1159,8 +1152,8 @@ size_t interpret(size_t from_pc)
         #define MATH_SHARED(C, C2, X) BIN_STACKPOP(1)\
             /*assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");*/\
             if (v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT)\
-                value_store(&frame->stack[PROG_IDX(1)], val_float((C v1.u.f) X (C2 v2.u.f)));\
-            else value_store(&frame->stack[PROG_IDX(1)], val_float(0.0));
+                value_store(&STACK_POP(1, 0), val_float((C v1.u.f) X (C2 v2.u.f)));\
+            else value_store(&STACK_POP(1, 0), val_float(0.0));
         
         NEXT_CASE(INST_ADD)    MATH_SHARED(,, +)    NEXT_CASE(INST_SUB)    MATH_SHARED(,, -)
         NEXT_CASE(INST_MUL)    MATH_SHARED(,, *)    NEXT_CASE(INST_DIV)    MATH_SHARED(,, /)
@@ -1171,13 +1164,13 @@ size_t interpret(size_t from_pc)
         
         #define MATH_SHARED_BOOL(X) BIN_STACKPOP(1)\
             assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Boolean comparison only works on numbers");\
-            value_store(&frame->stack[PROG_IDX(1)], val_float(X));
+            value_store(&STACK_POP(1, 0), val_float(X));
         
         NEXT_CASE(INST_CMP_AND)    MATH_SHARED_BOOL(!!(v1.u.f) && !!(v2.u.f))
         NEXT_CASE(INST_CMP_OR)     MATH_SHARED_BOOL(!!(v1.u.f) || !!(v2.u.f))
         
         #define LOCAL_MATH_SHARED(X)\
-            Value v2 = frame->stack[PROG_IDX(2)];\
+            Value v2 = STACK_POP(2, 0);\
             uint16_t id = PROG_IDX(1);\
             Value v1 = frame->vars[id];\
             assert2(0, v2.tag == VALUE_FLOAT && v1.tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
@@ -1187,7 +1180,7 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_SET_MUL)    LOCAL_MATH_SHARED(*)    NEXT_CASE(INST_SET_DIV)    LOCAL_MATH_SHARED(/)
             
         #define ADDR_MATH_SHARED(X)\
-            Value v2 = frame->stack[PROG_IDX(1)];\
+            Value v2 = STACK_POP(1, 0);\
             Value * v1p = frame->set_tgt_agg;\
             assert2(0, v1p && v2.tag == VALUE_FLOAT && v1p->tag == VALUE_FLOAT, "Operator " #X " only works on numbers");\
             frame->set_tgt_agg = 0;\
@@ -1198,7 +1191,7 @@ size_t interpret(size_t from_pc)
         
         #define EQ_SHARED(X) BIN_STACKPOP(1)\
             int8_t equality = val_cmp(v1, v2);\
-            value_store(&frame->stack[PROG_IDX(1)], val_float(X));
+            value_store(&STACK_POP(1, 0), val_float(X));
         
         NEXT_CASE(INST_CMP_EQ)    EQ_SHARED(equality == 0)    NEXT_CASE(INST_CMP_NE)    EQ_SHARED(equality != 0)
         NEXT_CASE(INST_CMP_LE)    EQ_SHARED(equality == 0 || equality == -1)
@@ -1206,7 +1199,7 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_CMP_LT)    EQ_SHARED(equality == -1)    NEXT_CASE(INST_CMP_GT)    EQ_SHARED(equality == 1)
         
         NEXT_CASE(INST_FORSTART)
-            Value v = frame->stack[PROG_IDX(5)];
+            Value v = STACK_POP(5, 0);
             assert2(0, v.tag == VALUE_FLOAT, "For loops can only operate on numbers");
             uint16_t id = PROG_IDX(1);
             uint16_t idx = PROG_IDX(2);
@@ -1222,8 +1215,8 @@ size_t interpret(size_t from_pc)
             if (frame->forloops[idx].l < frame->forloops[idx].r) READ_AND_GOTO_TARGET(3)
         
         NEXT_CASE(INST_JMP)    READ_AND_GOTO_TARGET(1)
-        NEXT_CASE(INST_JMP_IF_FALSE)    if (!val_truthy(frame->stack[PROG_IDX(3)])) READ_AND_GOTO_TARGET(1)
-        NEXT_CASE(INST_JMP_IF_TRUE)     if ( val_truthy(frame->stack[PROG_IDX(3)])) READ_AND_GOTO_TARGET(1)
+        NEXT_CASE(INST_JMP_IF_FALSE)    if (!val_truthy(STACK_POP(3, 0))) READ_AND_GOTO_TARGET(1)
+        NEXT_CASE(INST_JMP_IF_TRUE)     if ( val_truthy(STACK_POP(3, 0))) READ_AND_GOTO_TARGET(1)
         
         NEXT_CASE(PUSH_STRING)      STACK_PUSH(2, val_string(stringdup(cs->compiled_strings[PROG_IDX(1)])))
         
@@ -1231,12 +1224,12 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(PUSH_FUNCNAME)    STACK_PUSH(2, val_func(PROG_IDX(1)))
         
         NEXT_CASE(INST_SET)
-            value_store(&frame->vars[PROG_IDX(1)], frame->stack[PROG_IDX(2)]);
+            value_store(&frame->vars[PROG_IDX(1)], STACK_POP(2, 0));
             Value * v = &frame->vars[PROG_IDX(1)];
             if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; }
         
         NEXT_CASE(INST_SET_LOC)
-            Value v2 = frame->stack[PROG_IDX(1)];
+            Value v2 = STACK_POP(1, 0);
             if (frame->set_tgt_agg) { value_store(frame->set_tgt_agg, v2); frame->set_tgt_agg = 0; }
             else { assert2(0, frame->set_tgt_char && v2.tag == VALUE_STRING, "Invalid assignment.");
                 *frame->set_tgt_char = **v2.u.s; frame->set_tgt_char = 0; }
@@ -1253,7 +1246,7 @@ size_t interpret(size_t from_pc)
                 *ss = stringdupn(*v1.u.s + (size_t)v2.u.f, 1); v1.u.s = ss; }
             else if (v1.tag == VALUE_ARRAY) { Value * vp = array_get(v1.u.a, v2.u.f); if (!vp) return 0; v1 = *vp; }
             else if (v1.tag == VALUE_DICT)   v1 = dict_get_or_insert(v1.u.d, v2)->r;
-            frame->stack[PROG_IDX(1)] = v1;
+            STACK_POP(1, 0) = v1;
         
         NEXT_CASE(INST_INDEX_LOC)    INDEX_SHARED(<)
             // Our strings are double-boxed so that we can COW them without the compiler needing to be aware of
