@@ -123,6 +123,5 @@ let N = 1000000
 offsetMomentum(bodies)
 print(energy(bodies))
 for i in N: advance(bodies, 0.01) end
-#advance(N, bodies, 0.01)
 print(energy(bodies))
 

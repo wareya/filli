@@ -1033,7 +1033,7 @@ size_t interpret(size_t from_pc)
     #define CASES_START() size_t ret = GETOP(prog.,frame->pc)(&prog, frame->pc, prog.code, cache, frame, global_frame); free(cache); return ret;
     #define CASES_END()
     
-    #define PC_INC() pc += op >> 8; op = code[pc]; frame->pc = pc;
+    #define PC_INC() pc += op >> 8; op = code[pc];
     
     #define MARK_CASE(X) }  USE_TAILCALL_ABI size_t _handler_##X (Program * prog, size_t pc, uint16_t * code, size_t * cache, Frame * frame, Frame * global_frame) { uint16_t op = X;
     #define END_CASE() PC_INC(); __attribute__((musttail)) return GETOP(,pc)(prog, pc, code, cache, frame, global_frame);
@@ -1079,7 +1079,7 @@ size_t interpret(size_t from_pc)
             uint32_t idx = (IDX); uint32_t return_slot = (RETURN_SLOT);\
             assert4(0, fn->exists, "Function does not exist");\
             if (!fn->intrinsic) {\
-                PC_INC(); Frame * prev = frame;\
+                PC_INC(); frame->pc = pc; Frame * prev = frame;\
                 Frame * next = (FORCED) ? (FORCED) : (fn->poolsafe && framepool) ? framepoolpop() : (Frame *)zalloc(sizeof(Frame));\
                 next->fn = fn; next->return_to = frame; frame->return_slot = return_slot; frame = next; pc = frame->pc;\
                 assert4(0, argcount == fn->argcount, "Function arg count doesn't match");\
@@ -1102,7 +1102,7 @@ size_t interpret(size_t from_pc)
             Funcdef * fn = v_func.tag == VALUE_FUNC ? v_func.u.fn : v_func.u.fs->fn;
             ENTER_FUNC(PROG_IDX(2) + 1, PROG_IDX(2), v_func.tag == VALUE_FUNC ? 0 : v_func.u.fs->frame)
         
-        #define RETURN_WITH(POOLABLE, X) if (!frame->return_to) { PC_INC(); return frame->pc; }\
+        #define RETURN_WITH(POOLABLE, X) if (!frame->return_to) { PC_INC(); return pc; }\
             Frame * oldframe = frame; Value retval = (X); frame = frame->return_to; pc = frame->pc; value_store(&frame->vars[frame->return_slot], retval);\
             if (POOLABLE && oldframe->fn && oldframe->fn->poolsafe) framepoolpush(oldframe);\
             DISPATCH_IMMEDIATELY();
@@ -1110,7 +1110,7 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_YIELD)
             if (!frame->return_to) panic2(0, "Attempted to yield from not inside of a function");
             
-            PC_INC();
+            PC_INC(); frame->pc = pc;
             
             Value v = STACK_POP(1, 0);
             Value v2 = val_array(2);
@@ -1129,7 +1129,7 @@ size_t interpret(size_t from_pc)
             STACK_PUSH(1, v)
         
         NEXT_CASE(PUSH_NUM)
-            STACK_PUSH(5, val_float(fi_mem_read_f64(code + frame->pc + 1)))
+            STACK_PUSH(5, val_float(fi_mem_read_f64(code + pc + 1)))
         
         NEXT_CASE(PUSH_GLOBAL)    STACK_PUSH(2, global_frame->vars[PROG_IDX(1)])
             
@@ -1197,8 +1197,7 @@ size_t interpret(size_t from_pc)
             
         #define ADDR_MATH_SHARED(X)\
             Value v2 = STACK_POP(1, 0);\
-            Value * v1p = frame->set_tgt_agg;\
-            /*assert4(0, v1p, "Internal compiler error");*/\
+            Value * v1p = frame->set_tgt_agg; /*assert4(0, v1p, "Internal compiler error");*/\
             assert4(0, types_same_match(v1p->tag, v2.tag, VALUE_FLOAT), "Operator " #X " only works on numbers");\
             frame->set_tgt_agg = 0;\
             v1p->u.f = v1p->u.f X v2.u.f;
@@ -1207,8 +1206,7 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_SET_LOC_MUL)    ADDR_MATH_SHARED(*)    NEXT_CASE(INST_SET_LOC_DIV)    ADDR_MATH_SHARED(/)
         
         #define EQ_SHARED(X) BIN_STACKPOP(1)\
-            int8_t equality = val_cmp(v1, v2);\
-            value_store(&STACK_POP(1, 0), val_float(X));
+            int8_t equality = val_cmp(v1, v2); value_store(&STACK_POP(1, 0), val_float(X));
         
         NEXT_CASE(INST_CMP_EQ)    EQ_SHARED(equality == 0)    NEXT_CASE(INST_CMP_NE)    EQ_SHARED(equality != 0)
         NEXT_CASE(INST_CMP_LE)    EQ_SHARED(equality == 0 || equality == -1)
@@ -1243,12 +1241,12 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_SET)
             value_store(&frame->vars[PROG_IDX(1)], STACK_POP(2, 0));
             Value * v = &frame->vars[PROG_IDX(1)];
-            if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; }
+            if (__builtin_expect(v->tag == VALUE_STRING, 0)) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; }
         
         NEXT_CASE(INST_SET_LOC)
             Value v2 = STACK_POP(1, 0);
             if (frame->set_tgt_agg) { value_store(frame->set_tgt_agg, v2); frame->set_tgt_agg = 0; }
-            else { assert4(0, frame->set_tgt_char && v2.tag == VALUE_STRING, "Invalid assignment.");
+            else { assert4(0, frame->set_tgt_char && v2.tag == VALUE_STRING, "Invalid assignment");
                 *frame->set_tgt_char = **v2.u.s; frame->set_tgt_char = 0; }
         
         #define INDEX_SHARED(STR_VALID_OP) BIN_STACKPOP(1)\
