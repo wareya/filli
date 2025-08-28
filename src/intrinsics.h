@@ -83,7 +83,7 @@ void handle_intrinsic_func(uint16_t id, size_t argcount, Frame * frame, size_t s
             size_t j = 0;
             for (size_t i = 0; i < v.u.d->cap && j < v2.u.a->len; i++)
             {
-                if (v.u.d->buf[i].l.tag != VALUE_INVALID)
+                if (v.u.d->buf[i].l.tag != VALUE_INVALID && v.u.d->buf[i].l.tag != VALUE_TOMBSTONE)
                     v2.u.a->buf[j++] = v.u.d->buf[i].l;
             }
             STACK_PUSH2(v2)

@@ -1,5 +1,6 @@
 
 func calc(n):
+    print(n)
     let sum = 0
     let flip = 1
     for i in n:
