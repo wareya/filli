@@ -196,7 +196,7 @@ Read `microlib.h` and consider replacing it with wrappers around stdlib function
 
 If you need to add more predefined functions, add them in `intrinsics.h`.
 
-Filli has not been fuzzed, but makes an effort to avoid doing anything stupidly unsafe (i.e. it does bounds checks and zero-initializes everything).
+Filli has been fuzzed with Jackalope for a few hours with no crashes, so there shouldn't be any low-hanging-fruit memory safety bugs or crashes sitting around.
 
 ## License
 
