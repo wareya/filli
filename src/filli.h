@@ -267,9 +267,9 @@ void compiler_state_init(void)
 }
 
 //#define COMP_SPUSH ( assert(((void)"Stack exceeded limit.", cs->stackpos[cs->func_depth] < 1024)), cs->stackpos[cs->func_depth]++ )
-#define COMP_SPUSH ( assert3(((void)"Stack exceeded limit.", cs->stackpos[cs->func_depth] < 1024)), ((cs->stackpos[cs->func_depth] += (cs->stackpos[cs->func_depth] < 1024)) + FRAME_VARCOUNT - 1 ) * 2)
-#define COMP_S ((cs->stackpos[cs->func_depth] + FRAME_VARCOUNT) * 2)
-#define COMP_SPOP ( assert(cs->stackpos[cs->func_depth] != 0), (--cs->stackpos[cs->func_depth] + FRAME_VARCOUNT) * 2 )
+#define COMP_SPUSH ( assert3(((void)"Stack exceeded limit.", cs->stackpos[cs->func_depth] < 1024)), (cs->stackpos[cs->func_depth] += (cs->stackpos[cs->func_depth] < 1024)) + FRAME_VARCOUNT - 1 )
+#define COMP_S (cs->stackpos[cs->func_depth] + FRAME_VARCOUNT)
+#define COMP_SPOP ( assert(cs->stackpos[cs->func_depth] != 0), (--cs->stackpos[cs->func_depth]) + FRAME_VARCOUNT )
 
 // returns number of consumed tokens
 size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t i)
@@ -288,8 +288,8 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
         if (token_is(source, tokens, count, i, "true"))         return prog_write6(PUSH_NUM, 0, 0, 0, 0x3FF0, COMP_SPUSH), 1;
         else if (token_is(source, tokens, count, i, "false"))   return prog_write6(PUSH_NUM, 0, 0, 0, 0, COMP_SPUSH), 1;
         else if (token_is(source, tokens, count, i, "null"))    return prog_write2(PUSH_NULL, COMP_SPUSH), 1;
-        else if (cs->func_depth > 0 && cs->locals_reg[id])      prog_write3(PUSH_LOCAL, (cs->locals_reg[id] - 1) * 2, COMP_SPUSH);
-        else if (cs->func_depth == 0 && cs->globals_reg[id])    prog_write3(PUSH_LOCAL, (cs->globals_reg[id] - 1) * 2, COMP_SPUSH);
+        else if (cs->func_depth > 0 && cs->locals_reg[id])      prog_write3(PUSH_LOCAL, cs->locals_reg[id] - 1, COMP_SPUSH);
+        else if (cs->func_depth == 0 && cs->globals_reg[id])    prog_write3(PUSH_LOCAL, cs->globals_reg[id] - 1, COMP_SPUSH);
         else if (cs->func_depth > 0 && cs->caps_reg[id])        prog_write3(PUSH_CAP, cs->caps_reg[id] - 1, COMP_SPUSH);
         else if (cs->globals_reg[id])                           prog_write3(PUSH_GLOBAL, cs->globals_reg[id] - 1, COMP_SPUSH);
         else if (cs->funcs_reg[id].exists)                      prog_write3(PUSH_FUNCNAME, id, COMP_SPUSH);
@@ -374,7 +374,7 @@ size_t compile_innerexpr(const char * source, Token * tokens, size_t count, size
             if (tokens[i].kind >= -lex_ident_offset) return 0;
             int16_t id = lex_ident_offset - tokens[i++].kind;
             int16_t accessor_id = 0;
-            if      (cs->func_depth > 0 && cs->locals_reg[id])   accessor_id = (cs->locals_reg[id] - 1) * 2;
+            if      (cs->func_depth > 0 && cs->locals_reg[id])   accessor_id = cs->locals_reg[id] - 1;
             else if (cs->func_depth > 0 && cs->caps_reg  [id])   accessor_id = cs->caps_reg[id] - 1;
             else
             {
@@ -474,7 +474,7 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
     const uint16_t opcodes[] = {INST_SUB, INST_DIV, INST_ADD, INST_MUL, INST_INTMOD, INST_CMP_AND, INST_CMP_OR,
         INST_CMP_EQ, INST_CMP_NE, INST_CMP_GE, INST_CMP_LE, INST_CMP_GT, INST_CMP_LT, INST_BITAND, INST_BITOR, INST_BITXOR};
     
-    uint16_t si = COMP_SPOP - 2;
+    uint16_t si = COMP_SPOP - 1;
     if (cs->last_idx == prog.i - 2 && prog.code[cs->last_idx] == PUSH_LOCAL)
         { si = prog.code[cs->last_idx + 1]; cs->last_idx = 0; prog.i -= 2; }
     
@@ -587,7 +587,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
             size_t r = compile_expr(source, tokens, count, i + 1, 0);
             if (!r) return i - orig_i;
             i += r + 1;
-            prog_write3(INST_SET + (cs->func_depth == 0), (cs->func_depth == 0) ? cs->globals_n - 1 : (cs->locals_n - 1)*2, COMP_SPOP);
+            prog_write3(INST_SET + (cs->func_depth == 0), (cs->func_depth == 0) ? cs->globals_n - 1 : cs->locals_n - 1, COMP_SPOP);
         }
         return i - orig_i;
     }
@@ -602,7 +602,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         int16_t id = lex_ident_offset - tokens[i++].kind;
         if (cs->func_depth == 0) cs->globals_reg[id] = ++cs->globals_n;
         else                     cs->locals_reg [id] = ++cs->locals_n;
-        uint16_t idnum = ((cs->func_depth == 0) ? cs->globals_n - 1 : cs->locals_n - 1) * 2;
+        uint16_t idnum = (cs->func_depth == 0) ? cs->globals_n - 1 : cs->locals_n - 1;
         assert2(0, cs->globals_n < FRAME_VARCOUNT && cs->locals_n < FRAME_VARCOUNT, "Too many variables");
         assert2(0, token_is(source, tokens, count, i++, "in"), "Expected 'in'");
         uint16_t idx = cs->for_loop_index++;
@@ -659,7 +659,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         else if (strncmp(opstr, "*=", oplen) == 0) prog_write(INST_SET_MUL + mode);
         else if (strncmp(opstr, "/=", oplen) == 0) prog_write(INST_SET_DIV + mode);
         
-        prog_write2(mode == 0 ? (cs->locals_reg[id]-1)*2 : mode == 1 ? cs->globals_reg[id]-1 : cs->caps_reg[id]-1, COMP_SPOP);
+        prog_write2((mode == 0 ? cs->locals_reg[id] : mode == 1 ? cs->globals_reg[id] : cs->caps_reg[id]) - 1, COMP_SPOP);
         
         return i - orig_i;
     }
@@ -1065,11 +1065,9 @@ size_t interpret(size_t from_pc)
         MARK_CASE(INST_INVALID)     { panic("sdfakarwiu"); }
         NEXT_CASE(INST_FUNCDEF)     READ_AND_GOTO_TARGET(1)
         
-        #define VAR_AT2(X) (*((Value*)(((uint64_t*)(frame->vars))+(X))))
-        #define PROG_IDX(X) (code[pc + (X)])
-        #define STACK_PUSH(X, Y) { value_store(&frame->vars[PROG_IDX(X)/2], (Y)); }
-        //#define STACK_POP(X, Y) frame->vars[PROG_IDX(X)/2 + (Y)]
-        #define STACK_POP(X, Y) VAR_AT2(PROG_IDX(X) + (Y)*2)
+        #define PROG_IDX(X) code[pc + (X)]
+        #define STACK_PUSH(X, Y) { value_store(&frame->vars[PROG_IDX(X)], (Y)); }
+        #define STACK_POP(X, Y) frame->vars[PROG_IDX(X) + (Y)]
         
         NEXT_CASE(INST_ARRAY_LITERAL)
             uint16_t itemcount = PROG_IDX(1);
@@ -1095,14 +1093,14 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_FUNCCALL)
             uint16_t argcount = PROG_IDX(2);
             Funcdef * fn = &cs->funcs_reg[PROG_IDX(1)];
-            ENTER_FUNC(PROG_IDX(3)/2, PROG_IDX(3)/2, 0)
+            ENTER_FUNC(PROG_IDX(3), PROG_IDX(3), 0)
         
         NEXT_CASE(INST_FUNCCALL_REF)
             uint16_t argcount = PROG_IDX(1);
             Value v_func = STACK_POP(2, 0);
             assert4(0, v_func.tag == VALUE_FUNC || v_func.tag == VALUE_STATE, "Tried to call a non-function");
             Funcdef * fn = v_func.tag == VALUE_FUNC ? v_func.u.fn : v_func.u.fs->fn;
-            ENTER_FUNC(PROG_IDX(2)/2 + 1, PROG_IDX(2)/2, v_func.tag == VALUE_FUNC ? 0 : v_func.u.fs->frame)
+            ENTER_FUNC(PROG_IDX(2) + 1, PROG_IDX(2), v_func.tag == VALUE_FUNC ? 0 : v_func.u.fs->frame)
         
         #define RETURN_WITH(POOLABLE, X) if (!frame->return_to) { PC_INC(); return frame->pc; }\
             Frame * oldframe = frame; Value retval = (X); frame = frame->return_to; pc = frame->pc; value_store(&frame->vars[frame->return_slot], retval);\
@@ -1138,14 +1136,14 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_SET_GLOBAL)
             Value v2 = STACK_POP(2, 0);
             value_store(&global_frame->vars[PROG_IDX(1)], v2);
-            Value * v = &VAR_AT2(PROG_IDX(1));
+            Value * v = &frame->vars[PROG_IDX(1)];
             if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; }
         
         NEXT_CASE(PUSH_CAP)    STACK_PUSH(2, *frame->caps[PROG_IDX(1)])
         NEXT_CASE(INST_SET_CAP)
             Value v2 = STACK_POP(2, 0);
             value_store(frame->caps[PROG_IDX(1)], v2);
-            Value * v = &VAR_AT2(PROG_IDX(1));
+            Value * v = &frame->vars[PROG_IDX(1)];
             if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; }
         
         #define GLOBAL_MATH_SHARED(X)\
@@ -1222,7 +1220,7 @@ size_t interpret(size_t from_pc)
             assert4(0, v.tag == VALUE_FLOAT, "For loops can only operate on numbers");
             uint16_t id = PROG_IDX(1);
             uint16_t idx = PROG_IDX(2);
-            VAR_AT2(id) = val_float(0.0);
+            frame->vars[id] = val_float(0.0);
             if ((uint64_t)v.u.f < 1) READ_AND_GOTO_TARGET(3)
             frame->forloops[idx].l = 0;
             frame->forloops[idx].r = v.u.f;
@@ -1230,7 +1228,7 @@ size_t interpret(size_t from_pc)
             uint16_t id = PROG_IDX(1);
             uint16_t idx = PROG_IDX(2);
             frame->forloops[idx].l += 1;
-            value_store(&VAR_AT2(id), val_float(frame->forloops[idx].l));
+            value_store(&frame->vars[id], val_float(frame->forloops[idx].l));
             if (frame->forloops[idx].l < frame->forloops[idx].r) READ_AND_GOTO_TARGET(3)
         
         NEXT_CASE(INST_JMP)    READ_AND_GOTO_TARGET(1)
@@ -1239,13 +1237,12 @@ size_t interpret(size_t from_pc)
         
         NEXT_CASE(PUSH_STRING)      STACK_PUSH(2, val_string(stringdup(cs->compiled_strings[PROG_IDX(1)])))
         
-        NEXT_CASE(PUSH_LOCAL)       STACK_PUSH(2, VAR_AT2(PROG_IDX(1)))
-        //NEXT_CASE(PUSH_LOCAL)       STACK_PUSH(2, frame->vars[PROG_IDX(1)/2])
+        NEXT_CASE(PUSH_LOCAL)       STACK_PUSH(2, frame->vars[PROG_IDX(1)])
         NEXT_CASE(PUSH_FUNCNAME)    STACK_PUSH(2, val_func(PROG_IDX(1)))
         
         NEXT_CASE(INST_SET)
-            value_store(&VAR_AT2(PROG_IDX(1)), STACK_POP(2, 0));
-            Value * v = &VAR_AT2(PROG_IDX(1));
+            value_store(&frame->vars[PROG_IDX(1)], STACK_POP(2, 0));
+            Value * v = &frame->vars[PROG_IDX(1)];
             if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; }
         
         NEXT_CASE(INST_SET_LOC)
