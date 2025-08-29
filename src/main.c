@@ -69,13 +69,21 @@ int main(int argc, char ** argv)
         return 0;
     }
     
-    /*
+    #ifdef INSTX
+    #undef INSTX
+    #endif
+    
+    const char * ops[256] = {};
+    #define INSTX(X) ops[(X&0xFF)] = "    # " #X "\n";
+    INST_XMACRO()
+    
+    size_t j = 0;
     for (size_t i = 0; i < prog.i; i++)
     {
         printu16hex(prog.code[i]);
-        prints("\n");
+        if (j + (prog.code[j] >> 8) == i + 1) { prints(ops[prog.code[j] & 0xFF]); j = i + 1; }
+        else prints(" ");
     }
-    */
     
     interpret(0);
     

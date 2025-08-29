@@ -40,10 +40,13 @@
 const char * filli_err = 0;
 
 #define assert2(N, X, ...) { if (__builtin_expect(!(X), 0)) { if (!filli_err) { if (__VA_OPT__(1)+0) filli_err = #__VA_ARGS__; else filli_err = #X; } return N; } }
+//#define assert2(N, X, ...) { assert(X); }
 #define assert4(N, X, ...) { if (__builtin_expect(!(X), 0)) { { if (__VA_OPT__(1)+0) filli_err = #__VA_ARGS__; else filli_err = #X; } return N; } }
 //#define assert2(N, X, ...) assert(X, __VA_ARGS__)
 #define assert3(X, ...) (( (__builtin_expect(!(X), 0)) ? ( (__VA_OPT__(1)+0 && !filli_err) ? filli_err = #__VA_ARGS__ : (!filli_err) ? filli_err = #X : "") : ""), (void) 0 )
+//#define assert3(X, ...) ( assert(X) )
 #define panic2(N, X) { if (!filli_err) filli_err = #X; return N; }
+//#define panic2(N, X) { assert(0); }
 //#define panic2(N, X) panic(X)
 #define repanic(N) { if (filli_err) return N; }
 
@@ -55,7 +58,10 @@ const char * filli_err = 0;
 #define repanic(N) {}
 */
 
-void * zalloc(size_t s) { char * r = (char *)malloc(s); if (!r) panic("Out of memory"); memset(r, 0, s); return r; }
+static inline void * zalloc(size_t s) { char * r = (char *)malloc(s); if (!r) panic("Out of memory"); memset(r, 0, s); return r; }
+
+static inline uint32_t fi_mem_read_u32(void * from) { uint32_t n; memcpy(&n, from, 4); return n; }
+static inline double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
 
 // actual program
 
@@ -194,14 +200,14 @@ enum { INST_INVALID = 0x000,
     INST_INDEX, INST_INDEX_LOC, INST_CMP_EQ, INST_CMP_NE, INST_CMP_GT, INST_CMP_LT, INST_CMP_GE, INST_CMP_LE,
     INST_ADD, INST_SUB, INST_MUL, INST_DIV, INST_CMP_AND, INST_CMP_OR, INST_BITAND, INST_BITOR, INST_BITXOR, INST_INTMOD,
     // 2-op
-    PUSH_FUNCNAME = 0x340, INST_FUNCCALL_REF, PUSH_STRING, INST_ARRAY_LITERAL,
+    PUSH_FUNCNAME = 0x340, INST_FUNCCALL_REF, PUSH_STRING, INST_ARRAY_LITERAL, PUSH_INT,
     PUSH_LOCAL, PUSH_GLOBAL, PUSH_CAP, INST_SET, INST_SET_GLOBAL, INST_SET_CAP,
     INST_SET_ADD, INST_SET_GLOBAL_ADD, INST_SET_CAP_ADD, INST_SET_SUB, INST_SET_GLOBAL_SUB, INST_SET_CAP_SUB,
     INST_SET_MUL, INST_SET_GLOBAL_MUL, INST_SET_CAP_MUL, INST_SET_DIV, INST_SET_GLOBAL_DIV, INST_SET_CAP_DIV,
     
-    INST_JMP, INST_FUNCDEF,
+    INST_JMP, INST_FUNCDEF, INST_INDEX_INT, INST_INDEX_LOC_INT,
     // 3-op
-    INST_JMP_IF_FALSE = 0x460, INST_JMP_IF_TRUE, INST_FUNCCALL,
+    INST_JMP_IF_FALSE = 0x470, INST_JMP_IF_TRUE, INST_FUNCCALL, PUSH_2LOCALS,
     // jumps: destination
     // INST_FUNCDEF: skip destination
     // INST_FUNCCALL: func id, arg count
@@ -211,7 +217,7 @@ enum { INST_INVALID = 0x000,
     PUSH_NUM = 0x6a0, INST_LAMBDA, INST_FORSTART 
 };
 
-#define INST_XMACRO() INSTX(INST_INVALID) INSTX(PUSH_NULL) INSTX(PUSH_DICT_EMPTY) INSTX(INST_RETURN_VAL) INSTX(INST_RETURN_VOID) INSTX(INST_YIELD) INSTX(INST_ADD) INSTX(INST_SUB) INSTX(INST_MUL) INSTX(INST_DIV) INSTX(INST_CMP_AND) INSTX(INST_CMP_OR) INSTX(INST_SET_LOC) INSTX(INST_SET_LOC_ADD) INSTX(INST_SET_LOC_SUB) INSTX(INST_SET_LOC_MUL) INSTX(INST_SET_LOC_DIV) INSTX(INST_INDEX) INSTX(INST_INDEX_LOC) INSTX(INST_CMP_EQ) INSTX(INST_CMP_NE) INSTX(INST_CMP_GT) INSTX(INST_CMP_LT) INSTX(INST_CMP_GE) INSTX(INST_CMP_LE) INSTX(PUSH_FUNCNAME) INSTX(INST_FUNCCALL_REF) INSTX(PUSH_STRING) INSTX(INST_ARRAY_LITERAL) INSTX(PUSH_LOCAL) INSTX(PUSH_GLOBAL) INSTX(PUSH_CAP) INSTX(INST_SET) INSTX(INST_SET_GLOBAL) INSTX(INST_SET_CAP) INSTX(INST_SET_ADD) INSTX(INST_SET_GLOBAL_ADD) INSTX(INST_SET_CAP_ADD) INSTX(INST_SET_SUB) INSTX(INST_SET_GLOBAL_SUB) INSTX(INST_SET_CAP_SUB) INSTX(INST_SET_MUL) INSTX(INST_SET_GLOBAL_MUL) INSTX(INST_SET_CAP_MUL) INSTX(INST_SET_DIV) INSTX(INST_SET_GLOBAL_DIV) INSTX(INST_SET_CAP_DIV) INSTX(INST_JMP) INSTX(INST_JMP_IF_FALSE) INSTX(INST_JMP_IF_TRUE) INSTX(INST_FUNCDEF) INSTX(INST_FUNCCALL) INSTX(PUSH_NUM) INSTX(INST_FOREND) INSTX(INST_FORSTART) INSTX(INST_LAMBDA) INSTX(INST_BITAND) INSTX(INST_BITOR) INSTX(INST_BITXOR) INSTX(INST_INTMOD)
+#define INST_XMACRO() INSTX(INST_INVALID) INSTX(PUSH_NULL) INSTX(PUSH_DICT_EMPTY) INSTX(INST_RETURN_VAL) INSTX(INST_RETURN_VOID) INSTX(INST_YIELD) INSTX(INST_ADD) INSTX(INST_SUB) INSTX(INST_MUL) INSTX(INST_DIV) INSTX(INST_CMP_AND) INSTX(INST_CMP_OR) INSTX(INST_SET_LOC) INSTX(INST_SET_LOC_ADD) INSTX(INST_SET_LOC_SUB) INSTX(INST_SET_LOC_MUL) INSTX(INST_SET_LOC_DIV) INSTX(INST_INDEX) INSTX(INST_INDEX_LOC) INSTX(INST_CMP_EQ) INSTX(INST_CMP_NE) INSTX(INST_CMP_GT) INSTX(INST_CMP_LT) INSTX(INST_CMP_GE) INSTX(INST_CMP_LE) INSTX(PUSH_FUNCNAME) INSTX(INST_FUNCCALL_REF) INSTX(PUSH_STRING) INSTX(INST_ARRAY_LITERAL) INSTX(PUSH_LOCAL) INSTX(PUSH_GLOBAL) INSTX(PUSH_CAP) INSTX(INST_SET) INSTX(INST_SET_GLOBAL) INSTX(INST_SET_CAP) INSTX(INST_SET_ADD) INSTX(INST_SET_GLOBAL_ADD) INSTX(INST_SET_CAP_ADD) INSTX(INST_SET_SUB) INSTX(INST_SET_GLOBAL_SUB) INSTX(INST_SET_CAP_SUB) INSTX(INST_SET_MUL) INSTX(INST_SET_GLOBAL_MUL) INSTX(INST_SET_CAP_MUL) INSTX(INST_SET_DIV) INSTX(INST_SET_GLOBAL_DIV) INSTX(INST_SET_CAP_DIV) INSTX(INST_JMP) INSTX(INST_JMP_IF_FALSE) INSTX(INST_JMP_IF_TRUE) INSTX(INST_FUNCDEF) INSTX(INST_FUNCCALL) INSTX(PUSH_NUM) INSTX(INST_FOREND) INSTX(INST_FORSTART) INSTX(INST_LAMBDA) INSTX(INST_BITAND) INSTX(INST_BITOR) INSTX(INST_BITXOR) INSTX(INST_INTMOD) INSTX(INST_INDEX_INT) INSTX(INST_INDEX_LOC_INT) INSTX(PUSH_INT) INSTX(PUSH_2LOCALS)
 
 typedef struct _Program { uint16_t * code; uint32_t capacity; uint32_t i; } Program;
 Program prog = {0, PROGRAM_MAXLEN, 0};
@@ -281,12 +287,13 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
     if (tokens[i].kind > 1) return 0;
     if (tokens[i].kind < 0 && tokens[i].kind >= -lex_ident_offset) return 0;
     
+    uint32_t j = cs->last_idx;
+    cs->last_idx = prog.i;
     if (tokens[i].kind < 0)
     {
-        cs->last_idx = prog.i;
         uint16_t id = lex_ident_offset - tokens[i].kind;
-        if (token_is(source, tokens, count, i, "true"))         return prog_write6(PUSH_NUM, 0, 0, 0, 0x3FF0, COMP_SPUSH), 1;
-        else if (token_is(source, tokens, count, i, "false"))   return prog_write6(PUSH_NUM, 0, 0, 0, 0, COMP_SPUSH), 1;
+        if (token_is(source, tokens, count, i, "true"))         return prog_write3(PUSH_INT, 1, COMP_SPUSH), 1;
+        else if (token_is(source, tokens, count, i, "false"))   return prog_write3(PUSH_INT, 0, COMP_SPUSH), 1;
         else if (token_is(source, tokens, count, i, "null"))    return prog_write2(PUSH_NULL, COMP_SPUSH), 1;
         else if (cs->func_depth > 0 && cs->locals_reg[id])      prog_write3(PUSH_LOCAL, cs->locals_reg[id] - 1, COMP_SPUSH);
         else if (cs->func_depth == 0 && cs->globals_reg[id])    prog_write3(PUSH_LOCAL, cs->globals_reg[id] - 1, COMP_SPUSH);
@@ -298,6 +305,19 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
             printsn(source + tokens[i].i, tokens[i].len);
             prints("\n");
             panic2(0, "Unknown identifier");
+        }
+        if (prog.code[cs->last_idx] == PUSH_LOCAL && prog.code[j] == PUSH_LOCAL && j + 3 == cs->last_idx && prog.code[cs->last_idx + 2] == prog.code[j + 2] + 1)
+        {
+            prog.i -= 2; // 3+3(6) -> 4
+            prog.code[j] = PUSH_2LOCALS;
+            prog.code[j+3] = prog.code[j+2];
+            prog.code[j+2] = prog.code[j+4];
+            cs->last_idx = j;
+        }
+        else if (prog.code[cs->last_idx] == PUSH_LOCAL && prog.code[j] == INST_SET && j + 3 == cs->last_idx && prog.code[cs->last_idx + 2] == prog.code[j + 2] && prog.code[cs->last_idx + 1] == prog.code[j + 1])
+        {
+            prog.i -= 3;
+            cs->last_idx = j;
         }
     }
     else if (tokens[i].kind == 1)
@@ -327,8 +347,8 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
         double f = badstrtod(s);
         free(s);
         
-        prog_write6(PUSH_NUM, 0, 0, 0, 0, COMP_SPUSH);
-        memcpy(prog.code + (prog.i - 5), &f, 8);
+        if (f == (uint16_t)f) prog_write3(PUSH_INT, (uint16_t)f, COMP_SPUSH);
+        else { prog_write6(PUSH_NUM, 0, 0, 0, 0, COMP_SPUSH); memcpy(prog.code + (prog.i - 5), &f, 8); }
     }
     
     return 1;
@@ -466,7 +486,17 @@ size_t compile_binexpr(const char * source, Token * tokens, size_t count, size_t
         assert2(0, token_is(source, tokens, count, i++, "]"));
         COMP_SPOP;
         COMP_SPOP;
+        uint32_t j = prog.i;
         prog_write2(INST_INDEX, COMP_SPUSH);
+        if (cs->last_idx == prog.i - 5 && prog.code[cs->last_idx] == PUSH_INT)
+        {
+            uint16_t f = prog.code[cs->last_idx + 1];
+            uint16_t sp = prog.code[prog.i - 1];
+            prog.i -= 5;
+            cs->last_idx = prog.i;
+            prog_write3(INST_INDEX_INT, (uint16_t)f, sp);
+        }
+        else cs->last_idx = j;
         return r + 1;
     }
     
@@ -587,6 +617,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
             size_t r = compile_expr(source, tokens, count, i + 1, 0);
             if (!r) return i - orig_i;
             i += r + 1;
+            cs->last_idx = prog.i;
             prog_write3(INST_SET + (cs->func_depth == 0), (cs->func_depth == 0) ? cs->globals_n - 1 : cs->locals_n - 1, COMP_SPOP);
         }
         return i - orig_i;
@@ -653,6 +684,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         else if (cs->globals_reg[id]) mode = 1;
         else panic2(0, "Unknown variable");
         
+        cs->last_idx = prog.i;
         if (strncmp(opstr, "=", oplen) == 0)       prog_write(INST_SET + mode);
         else if (strncmp(opstr, "+=", oplen) == 0) prog_write(INST_SET_ADD + mode);
         else if (strncmp(opstr, "-=", oplen) == 0) prog_write(INST_SET_SUB + mode);
@@ -718,16 +750,20 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         }
         i += r;
         
-        if (prog.i >= 2 && prog.code[prog.i - 2] == INST_INDEX && (token_is(source, tokens, count, i, "=")
+        uint32_t ok_idx = 0;
+        if (cs->last_idx == prog.i - 2 && prog.code[prog.i - 2] == INST_INDEX) ok_idx = 2;
+        if (cs->last_idx == prog.i - 3 && prog.code[prog.i - 3] == INST_INDEX_INT) ok_idx = 3;
+        
+        if (ok_idx && (token_is(source, tokens, count, i, "=")
              || token_is(source, tokens, count, i, "+=") || token_is(source, tokens, count, i, "-=")
              || token_is(source, tokens, count, i, "*=") || token_is(source, tokens, count, i, "/=")))
         {
             size_t old_i = i;
-            uint32_t checkpoint = prog.i - 2;
+            uint32_t checkpoint = prog.i - ok_idx;
             size_t r2 = compile_expr(source, tokens, count, i + 1, 0);
             if (!r2) { COMP_SPOP; return r; }
             r += r2 + 1;
-            prog.code[checkpoint] = INST_INDEX_LOC;
+            prog.code[checkpoint] = ok_idx == 2 ? INST_INDEX_LOC : INST_INDEX_LOC_INT;
             if (token_is(source, tokens, count, old_i, "=" )) prog_write2(INST_SET_LOC, COMP_SPOP);
             if (token_is(source, tokens, count, old_i, "+=")) prog_write2(INST_SET_LOC_ADD, COMP_SPOP);
             if (token_is(source, tokens, count, old_i, "-=")) prog_write2(INST_SET_LOC_SUB, COMP_SPOP);
@@ -974,12 +1010,10 @@ typedef struct _LoopPair { uint64_t l; uint64_t r; } LoopPair;
 typedef struct _Frame {
     uint32_t pc, return_slot;
     struct _Frame * return_to;
-    Value * set_tgt_agg;
-    char * set_tgt_char;
+    Value * set_tgt_agg; char * set_tgt_char;
     Value vars[FRAME_VARCOUNT + FRAME_STACKSIZE];
     LoopPair forloops[FORLOOP_COUNT_LIMIT];
-    Value ** caps;
-    Funcdef * fn;
+    Value ** caps; Funcdef * fn;
 } Frame;
 
 void print_op_and_panic(uint16_t op) { prints("---\n"); printu16hex(op); prints("\n---\n"); panic2(, "Unknown operation"); }
@@ -998,9 +1032,6 @@ INST_XMACRO()
 
 typedef  size_t (*USE_TAILCALL_ABI handler)(Program *, size_t, uint16_t *, size_t *, Frame *, Frame *);
 static handler ops[0x100] = {};
-
-uint32_t fi_mem_read_u32(void * from) { uint32_t n; memcpy(&n, from, 4); return n; }
-double fi_mem_read_f64(void * from) { double f; memcpy(&f, from, 8); return f; }
 
 size_t interpret(size_t from_pc)
 {
@@ -1066,14 +1097,14 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_FUNCDEF)     READ_AND_GOTO_TARGET(1)
         
         #define PROG_IDX(X) code[pc + (X)]
-        #define STACK_PUSH(X, Y) { value_store(&frame->vars[PROG_IDX(X)], (Y)); }
+        #define STACK_PUSH(X, Y, Z) { value_store(&frame->vars[PROG_IDX(X) + (Z)], (Y)); }
         #define STACK_POP(X, Y) frame->vars[PROG_IDX(X) + (Y)]
         
         NEXT_CASE(INST_ARRAY_LITERAL)
             uint16_t itemcount = PROG_IDX(1);
             Value v = val_array(itemcount);
             for (size_t i = 0; i < itemcount; i++) v.u.a->buf[i] = STACK_POP(2, i);
-            STACK_PUSH(2, v)
+            STACK_PUSH(2, v, 0)
         
         #define ENTER_FUNC(IDX, RETURN_SLOT, FORCED)\
             uint32_t idx = (IDX); uint32_t return_slot = (RETURN_SLOT);\
@@ -1121,17 +1152,18 @@ size_t interpret(size_t from_pc)
         
         NEXT_CASE(INST_RETURN_VAL)    RETURN_WITH(1, STACK_POP(1, 0));
         NEXT_CASE(INST_RETURN_VOID)    RETURN_WITH(1, val_tagged(VALUE_NULL));
-        NEXT_CASE(PUSH_NULL)    STACK_PUSH(1, val_tagged(VALUE_NULL))
+        NEXT_CASE(PUSH_NULL)    STACK_PUSH(1, val_tagged(VALUE_NULL), 0)
         
         NEXT_CASE(PUSH_DICT_EMPTY)
             Value v = val_tagged(VALUE_DICT);
             v.u.d = (Dict *)zalloc(sizeof(Dict));
-            STACK_PUSH(1, v)
+            STACK_PUSH(1, v, 0)
         
+        NEXT_CASE(PUSH_INT) STACK_PUSH(2, val_float(PROG_IDX(1)), 0)
         NEXT_CASE(PUSH_NUM)
-            STACK_PUSH(5, val_float(fi_mem_read_f64(code + pc + 1)))
+            STACK_PUSH(5, val_float(fi_mem_read_f64(code + pc + 1)), 0)
         
-        NEXT_CASE(PUSH_GLOBAL)    STACK_PUSH(2, global_frame->vars[PROG_IDX(1)])
+        NEXT_CASE(PUSH_GLOBAL)    STACK_PUSH(2, global_frame->vars[PROG_IDX(1)], 0)
             
         NEXT_CASE(INST_SET_GLOBAL)
             Value v2 = STACK_POP(2, 0);
@@ -1139,7 +1171,7 @@ size_t interpret(size_t from_pc)
             Value * v = &frame->vars[PROG_IDX(1)];
             if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; }
         
-        NEXT_CASE(PUSH_CAP)    STACK_PUSH(2, *frame->caps[PROG_IDX(1)])
+        NEXT_CASE(PUSH_CAP)    STACK_PUSH(2, *frame->caps[PROG_IDX(1)], 0)
         NEXT_CASE(INST_SET_CAP)
             Value v2 = STACK_POP(2, 0);
             value_store(frame->caps[PROG_IDX(1)], v2);
@@ -1233,10 +1265,11 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_JMP_IF_FALSE)    if (!val_truthy(STACK_POP(3, 0))) READ_AND_GOTO_TARGET(1)
         NEXT_CASE(INST_JMP_IF_TRUE)     if ( val_truthy(STACK_POP(3, 0))) READ_AND_GOTO_TARGET(1)
         
-        NEXT_CASE(PUSH_STRING)      STACK_PUSH(2, val_string(stringdup(cs->compiled_strings[PROG_IDX(1)])))
+        NEXT_CASE(PUSH_STRING)      STACK_PUSH(2, val_string(stringdup(cs->compiled_strings[PROG_IDX(1)])), 0)
         
-        NEXT_CASE(PUSH_LOCAL)       STACK_PUSH(2, frame->vars[PROG_IDX(1)])
-        NEXT_CASE(PUSH_FUNCNAME)    STACK_PUSH(2, val_func(PROG_IDX(1)))
+        NEXT_CASE(PUSH_LOCAL)       STACK_PUSH(2, frame->vars[PROG_IDX(1)], 0)
+        NEXT_CASE(PUSH_2LOCALS)     STACK_PUSH(3, frame->vars[PROG_IDX(1)], 0) STACK_PUSH(3, frame->vars[PROG_IDX(2)], 1)
+        NEXT_CASE(PUSH_FUNCNAME)    STACK_PUSH(2, val_func(PROG_IDX(1)), 0)
         
         NEXT_CASE(INST_SET)
             value_store(&frame->vars[PROG_IDX(1)], STACK_POP(2, 0));
@@ -1245,31 +1278,35 @@ size_t interpret(size_t from_pc)
         
         NEXT_CASE(INST_SET_LOC)
             Value v2 = STACK_POP(1, 0);
-            if (frame->set_tgt_agg) { value_store(frame->set_tgt_agg, v2); frame->set_tgt_agg = 0; }
+            if (__builtin_expect(!!frame->set_tgt_agg, 1)) { value_store(frame->set_tgt_agg, v2); frame->set_tgt_agg = 0; }
             else { assert4(0, frame->set_tgt_char && v2.tag == VALUE_STRING, "Invalid assignment");
                 *frame->set_tgt_char = **v2.u.s; frame->set_tgt_char = 0; }
         
-        #define INDEX_SHARED(STR_VALID_OP) BIN_STACKPOP(1)\
+        #define INDEX_SHARED(STR_VALID_OP) \
             assert4(0, v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY || v1.tag == VALUE_DICT);\
-            if (v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY) assert4(0, v2.tag == VALUE_FLOAT);\
+            if (v1.tag == VALUE_STRING || v1.tag == VALUE_ARRAY) assert4(0, v2.tag == VALUE_FLOAT,"Unsupported index");\
             if (v1.tag == VALUE_DICT) assert4(0, v2.tag == VALUE_FLOAT || v2.tag == VALUE_STRING\
-                                             || v2.tag == VALUE_FUNC || v2.tag == VALUE_NULL);\
-            if (v1.tag == VALUE_STRING) assert4(0, ((size_t)v2.u.f) STR_VALID_OP strlen(*v1.u.s));
+                                             || v2.tag == VALUE_FUNC || v2.tag == VALUE_NULL,"Unsupported dict key");\
+            if (v1.tag == VALUE_STRING) assert4(0, ((size_t)v2.u.f) STR_VALID_OP strlen(*v1.u.s),"Index out of bounds");
     
-        NEXT_CASE(INST_INDEX)    INDEX_SHARED(<=)
-            if (v1.tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *));
-                *ss = stringdupn(*v1.u.s + (size_t)v2.u.f, 1); v1.u.s = ss; }
-            else if (v1.tag == VALUE_ARRAY) { Value * vp = array_get(v1.u.a, v2.u.f); if (!vp) return 0; v1 = *vp; }
-            else if (v1.tag == VALUE_DICT)   v1 = dict_get_or_insert(v1.u.d, v2)->r;
-            STACK_POP(1, 0) = v1;
-        
-        NEXT_CASE(INST_INDEX_LOC)    INDEX_SHARED(<)
+        #define INST_INDEX_BODY(X) INDEX_SHARED(<=) \
+            if (v1.tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *));\
+                *ss = stringdupn(*v1.u.s + (size_t)v2.u.f, 1); v1.u.s = ss; }\
+            else if (v1.tag == VALUE_ARRAY) { Value * vp = array_get(v1.u.a, v2.u.f); if (!vp) return 0; v1 = *vp; }\
+            else if (v1.tag == VALUE_DICT)   v1 = dict_get_or_insert(v1.u.d, v2)->r;\
+            STACK_POP(X, 0) = v1;
+            
+        #define INST_INDEX_LOC_BODY()  INDEX_SHARED(<) \
+            if (v1.tag == VALUE_STRING) { assert4(0, (size_t)v2.u.f <= strlen(*v1.u.s), "Index past end of string"); \
+                *v1.u.s = stringdupn(*v1.u.s, strlen(*v1.u.s) + 1); frame->set_tgt_char = *v1.u.s + (size_t)v2.u.f; } \
+            else if (v1.tag == VALUE_ARRAY)  frame->set_tgt_agg = array_get(v1.u.a, v2.u.f); \
+            else if (v1.tag == VALUE_DICT)   frame->set_tgt_agg = &(dict_get_or_insert(v1.u.d, v2)->r);
             // Our strings are double-boxed so that we can COW them without the compiler needing to be aware of
             //  whether a string value is going to be used as a "place"/"lvalue" or not.
-            if (v1.tag == VALUE_STRING) { assert4(0, (size_t)v2.u.f <= strlen(*v1.u.s), "Index past end of string");
-                *v1.u.s = stringdupn(*v1.u.s, strlen(*v1.u.s) + 1); frame->set_tgt_char = *v1.u.s + (size_t)v2.u.f; }
-            else if (v1.tag == VALUE_ARRAY)  frame->set_tgt_agg = array_get(v1.u.a, v2.u.f);
-            else if (v1.tag == VALUE_DICT)   frame->set_tgt_agg = &(dict_get_or_insert(v1.u.d, v2)->r);
+        
+        NEXT_CASE(INST_INDEX)    BIN_STACKPOP(1) INST_INDEX_BODY(1)
+        
+        NEXT_CASE(INST_INDEX_LOC)    BIN_STACKPOP(1) INST_INDEX_LOC_BODY()
         
         NEXT_CASE(INST_LAMBDA)
             Value v = val_func(PROG_IDX(1));
@@ -1280,7 +1317,11 @@ size_t interpret(size_t from_pc)
             for (size_t j = 0; j < f->cap_count; j++)
                 f->cap_data[j] = (f->caps[j] < 0) ? frame->caps[-f->caps[j]] : &frame->vars[f->caps[j]];
             v.u.fn = f;
-            STACK_PUSH(5, v) READ_AND_GOTO_TARGET(3)
+            STACK_PUSH(5, v, 0) READ_AND_GOTO_TARGET(3)
+        
+        NEXT_CASE(INST_INDEX_INT)    Value v1 = STACK_POP(2, 0); Value v2 = val_float(PROG_IDX(1)); INST_INDEX_BODY(2)
+        
+        NEXT_CASE(INST_INDEX_LOC_INT)    Value v1 = STACK_POP(2, 0); Value v2 = val_float(PROG_IDX(1)); INST_INDEX_LOC_BODY()
         
         END_CASE()
         DECAULT_CASE()

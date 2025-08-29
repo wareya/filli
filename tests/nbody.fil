@@ -51,6 +51,7 @@ let bodies = [sun, jupiter, saturn, uranus, neptune]
 
 func advance(bodies, dt):
   let numbodies = len(bodies)
+  let numbodiessub1 = len(bodies) - 1
   for i in numbodies:
     let bi = bodies[i]
     let bix = bi[0]
@@ -58,7 +59,7 @@ func advance(bodies, dt):
     let biz = bi[2]
     let bimass = bi[6]
     let i1 = i + 1
-    for j in numbodies - i - 1:
+    for j in numbodiessub1 - i:
       let bj = bodies[j + i1]
       let dx = bix-bj[0]
       let dy = biy-bj[1]
@@ -66,7 +67,7 @@ func advance(bodies, dt):
       let dist2 = dx*dx + dy*dy + dz*dz
       let mag = sqrt(dist2)
       mag = dt / (mag * dist2)
-      let bm = bj[6]*mag
+      let bm = mag * bj[6]
       bi[3] -= (dx * bm)
       bi[4] -= (dy * bm)
       bi[5] -= (dz * bm)
