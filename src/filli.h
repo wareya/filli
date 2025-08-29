@@ -101,8 +101,7 @@ void lex_init(void)
 {
     // give keywords known ids
     const char * keywords[] = { "if", "else", "elif", "func", "while", "for", "break", "continue", "return", "let", "end", "lambda", "yield"};
-    for (size_t j = 0; j < sizeof(keywords) / sizeof(keywords[0]); j++)
-        insert_or_lookup_id(keywords[j], strlen(keywords[j]));
+    for (size_t j = 0; j < sizeof(keywords) / sizeof(keywords[0]); j++) insert_or_lookup_id(keywords[j], strlen(keywords[j]));
 
     // 1: if
     // 2: else
@@ -207,7 +206,7 @@ enum { INST_INVALID = 0x000,
     
     INST_JMP, INST_FUNCDEF, INST_INDEX_INT, INST_INDEX_LOC_INT,
     // 3-op
-    INST_JMP_IF_FALSE = 0x470, INST_JMP_IF_TRUE, INST_FUNCCALL, PUSH_2LOCALS,
+    INST_JMP_IF_FALSE = 0x470, INST_JMP_IF_TRUE, INST_FUNCCALL,
     // jumps: destination
     // INST_FUNCDEF: skip destination
     // INST_FUNCCALL: func id, arg count
@@ -217,7 +216,7 @@ enum { INST_INVALID = 0x000,
     PUSH_NUM = 0x6a0, INST_LAMBDA, INST_FORSTART 
 };
 
-#define INST_XMACRO() INSTX(INST_INVALID) INSTX(PUSH_NULL) INSTX(PUSH_DICT_EMPTY) INSTX(INST_RETURN_VAL) INSTX(INST_RETURN_VOID) INSTX(INST_YIELD) INSTX(INST_ADD) INSTX(INST_SUB) INSTX(INST_MUL) INSTX(INST_DIV) INSTX(INST_CMP_AND) INSTX(INST_CMP_OR) INSTX(INST_SET_LOC) INSTX(INST_SET_LOC_ADD) INSTX(INST_SET_LOC_SUB) INSTX(INST_SET_LOC_MUL) INSTX(INST_SET_LOC_DIV) INSTX(INST_INDEX) INSTX(INST_INDEX_LOC) INSTX(INST_CMP_EQ) INSTX(INST_CMP_NE) INSTX(INST_CMP_GT) INSTX(INST_CMP_LT) INSTX(INST_CMP_GE) INSTX(INST_CMP_LE) INSTX(PUSH_FUNCNAME) INSTX(INST_FUNCCALL_REF) INSTX(PUSH_STRING) INSTX(INST_ARRAY_LITERAL) INSTX(PUSH_LOCAL) INSTX(PUSH_GLOBAL) INSTX(PUSH_CAP) INSTX(INST_SET) INSTX(INST_SET_GLOBAL) INSTX(INST_SET_CAP) INSTX(INST_SET_ADD) INSTX(INST_SET_GLOBAL_ADD) INSTX(INST_SET_CAP_ADD) INSTX(INST_SET_SUB) INSTX(INST_SET_GLOBAL_SUB) INSTX(INST_SET_CAP_SUB) INSTX(INST_SET_MUL) INSTX(INST_SET_GLOBAL_MUL) INSTX(INST_SET_CAP_MUL) INSTX(INST_SET_DIV) INSTX(INST_SET_GLOBAL_DIV) INSTX(INST_SET_CAP_DIV) INSTX(INST_JMP) INSTX(INST_JMP_IF_FALSE) INSTX(INST_JMP_IF_TRUE) INSTX(INST_FUNCDEF) INSTX(INST_FUNCCALL) INSTX(PUSH_NUM) INSTX(INST_FOREND) INSTX(INST_FORSTART) INSTX(INST_LAMBDA) INSTX(INST_BITAND) INSTX(INST_BITOR) INSTX(INST_BITXOR) INSTX(INST_INTMOD) INSTX(INST_INDEX_INT) INSTX(INST_INDEX_LOC_INT) INSTX(PUSH_INT) INSTX(PUSH_2LOCALS)
+#define INST_XMACRO() INSTX(INST_INVALID) INSTX(PUSH_NULL) INSTX(PUSH_DICT_EMPTY) INSTX(INST_RETURN_VAL) INSTX(INST_RETURN_VOID) INSTX(INST_YIELD) INSTX(INST_ADD) INSTX(INST_SUB) INSTX(INST_MUL) INSTX(INST_DIV) INSTX(INST_CMP_AND) INSTX(INST_CMP_OR) INSTX(INST_SET_LOC) INSTX(INST_SET_LOC_ADD) INSTX(INST_SET_LOC_SUB) INSTX(INST_SET_LOC_MUL) INSTX(INST_SET_LOC_DIV) INSTX(INST_INDEX) INSTX(INST_INDEX_LOC) INSTX(INST_CMP_EQ) INSTX(INST_CMP_NE) INSTX(INST_CMP_GT) INSTX(INST_CMP_LT) INSTX(INST_CMP_GE) INSTX(INST_CMP_LE) INSTX(PUSH_FUNCNAME) INSTX(INST_FUNCCALL_REF) INSTX(PUSH_STRING) INSTX(INST_ARRAY_LITERAL) INSTX(PUSH_LOCAL) INSTX(PUSH_GLOBAL) INSTX(PUSH_CAP) INSTX(INST_SET) INSTX(INST_SET_GLOBAL) INSTX(INST_SET_CAP) INSTX(INST_SET_ADD) INSTX(INST_SET_GLOBAL_ADD) INSTX(INST_SET_CAP_ADD) INSTX(INST_SET_SUB) INSTX(INST_SET_GLOBAL_SUB) INSTX(INST_SET_CAP_SUB) INSTX(INST_SET_MUL) INSTX(INST_SET_GLOBAL_MUL) INSTX(INST_SET_CAP_MUL) INSTX(INST_SET_DIV) INSTX(INST_SET_GLOBAL_DIV) INSTX(INST_SET_CAP_DIV) INSTX(INST_JMP) INSTX(INST_JMP_IF_FALSE) INSTX(INST_JMP_IF_TRUE) INSTX(INST_FUNCDEF) INSTX(INST_FUNCCALL) INSTX(PUSH_NUM) INSTX(INST_FOREND) INSTX(INST_FORSTART) INSTX(INST_LAMBDA) INSTX(INST_BITAND) INSTX(INST_BITOR) INSTX(INST_BITXOR) INSTX(INST_INTMOD) INSTX(INST_INDEX_INT) INSTX(INST_INDEX_LOC_INT) INSTX(PUSH_INT)
 
 typedef struct _Program { uint16_t * code; uint32_t capacity; uint32_t i; } Program;
 Program prog = {0, PROGRAM_MAXLEN, 0};
@@ -287,7 +286,6 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
     if (tokens[i].kind > 1) return 0;
     if (tokens[i].kind < 0 && tokens[i].kind >= -lex_ident_offset) return 0;
     
-    uint32_t j = cs->last_idx;
     cs->last_idx = prog.i;
     if (tokens[i].kind < 0)
     {
@@ -305,19 +303,6 @@ size_t compile_value(const char * source, Token * tokens, size_t count, uint32_t
             printsn(source + tokens[i].i, tokens[i].len);
             prints("\n");
             panic2(0, "Unknown identifier");
-        }
-        if (prog.code[cs->last_idx] == PUSH_LOCAL && prog.code[j] == PUSH_LOCAL && j + 3 == cs->last_idx && prog.code[cs->last_idx + 2] == prog.code[j + 2] + 1)
-        {
-            prog.i -= 2; // 3+3(6) -> 4
-            prog.code[j] = PUSH_2LOCALS;
-            prog.code[j+3] = prog.code[j+2];
-            prog.code[j+2] = prog.code[j+4];
-            cs->last_idx = j;
-        }
-        else if (prog.code[cs->last_idx] == PUSH_LOCAL && prog.code[j] == INST_SET && j + 3 == cs->last_idx && prog.code[cs->last_idx + 2] == prog.code[j + 2] && prog.code[cs->last_idx + 1] == prog.code[j + 1])
-        {
-            prog.i -= 3;
-            cs->last_idx = j;
         }
     }
     else if (tokens[i].kind == 1)
@@ -451,8 +436,7 @@ size_t compile_expr(const char * source, Token * tokens, size_t count, size_t i,
     while (i < count && right_bind_power < tokenop_bindlevel(source, tokens, count, i))
     {
         size_t r = compile_binexpr(source, tokens, count, i);
-        ret += r;
-        if (r == 0) break; else i += r;
+        ret += r; if (r == 0) break; else i += r;
     }
     
     return ret;
@@ -617,7 +601,6 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
             size_t r = compile_expr(source, tokens, count, i + 1, 0);
             if (!r) return i - orig_i;
             i += r + 1;
-            cs->last_idx = prog.i;
             prog_write3(INST_SET + (cs->func_depth == 0), (cs->func_depth == 0) ? cs->globals_n - 1 : cs->locals_n - 1, COMP_SPOP);
         }
         return i - orig_i;
@@ -684,7 +667,6 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
         else if (cs->globals_reg[id]) mode = 1;
         else panic2(0, "Unknown variable");
         
-        cs->last_idx = prog.i;
         if (strncmp(opstr, "=", oplen) == 0)       prog_write(INST_SET + mode);
         else if (strncmp(opstr, "+=", oplen) == 0) prog_write(INST_SET_ADD + mode);
         else if (strncmp(opstr, "-=", oplen) == 0) prog_write(INST_SET_SUB + mode);
@@ -720,8 +702,7 @@ size_t compile_statement(const char * source, Token * tokens, size_t count, size
     {
         assert2(0, cs->loop_nesting > 0, "Tried to use break/continue outside of loop");
         prog_write3(INST_JMP, 0, 0);
-        if (token_is(source, tokens, count, i, "continue"))
-            cs->loop_conts[cs->loop_cont_i++] = prog.i - 2;
+        if (token_is(source, tokens, count, i, "continue")) cs->loop_conts[cs->loop_cont_i++] = prog.i - 2;
         else { cs->loop_breaks[cs->loop_break_i++] = prog.i - 2; }
         return 1;
     }
@@ -1150,7 +1131,7 @@ size_t interpret(size_t from_pc)
             
             RETURN_WITH(0, v2);
         
-        NEXT_CASE(INST_RETURN_VAL)    RETURN_WITH(1, STACK_POP(1, 0));
+        NEXT_CASE(INST_RETURN_VAL)     RETURN_WITH(1, STACK_POP(1, 0));
         NEXT_CASE(INST_RETURN_VOID)    RETURN_WITH(1, val_tagged(VALUE_NULL));
         NEXT_CASE(PUSH_NULL)    STACK_PUSH(1, val_tagged(VALUE_NULL), 0)
         
@@ -1159,29 +1140,24 @@ size_t interpret(size_t from_pc)
             v.u.d = (Dict *)zalloc(sizeof(Dict));
             STACK_PUSH(1, v, 0)
         
-        NEXT_CASE(PUSH_INT) STACK_PUSH(2, val_float(PROG_IDX(1)), 0)
-        NEXT_CASE(PUSH_NUM)
-            STACK_PUSH(5, val_float(fi_mem_read_f64(code + pc + 1)), 0)
+        NEXT_CASE(PUSH_INT)     STACK_PUSH(2, val_float(PROG_IDX(1)), 0)
+        NEXT_CASE(PUSH_NUM)     STACK_PUSH(5, val_float(fi_mem_read_f64(code + pc + 1)), 0)
         
         NEXT_CASE(PUSH_GLOBAL)    STACK_PUSH(2, global_frame->vars[PROG_IDX(1)], 0)
             
-        NEXT_CASE(INST_SET_GLOBAL)
-            Value v2 = STACK_POP(2, 0);
+        NEXT_CASE(INST_SET_GLOBAL)      Value v2 = STACK_POP(2, 0);
             value_store(&global_frame->vars[PROG_IDX(1)], v2);
             Value * v = &frame->vars[PROG_IDX(1)];
             if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; }
         
         NEXT_CASE(PUSH_CAP)    STACK_PUSH(2, *frame->caps[PROG_IDX(1)], 0)
-        NEXT_CASE(INST_SET_CAP)
-            Value v2 = STACK_POP(2, 0);
+        NEXT_CASE(INST_SET_CAP)     Value v2 = STACK_POP(2, 0);
             value_store(frame->caps[PROG_IDX(1)], v2);
             Value * v = &frame->vars[PROG_IDX(1)];
             if (v->tag == VALUE_STRING) { char ** ss = (char **)zalloc(sizeof(char *)); *ss = *v->u.s; v->u.s = ss; }
         
         #define GLOBAL_MATH_SHARED(X)\
-            Value v2 = STACK_POP(2, 0);\
-            uint16_t id = PROG_IDX(1);\
-            Value v1 = global_frame->vars[id];\
+            Value v2 = STACK_POP(2, 0); uint16_t id = PROG_IDX(1); Value v1 = global_frame->vars[id];\
             assert4(0, types_same_match(v1.tag, v2.tag, VALUE_FLOAT), "Operator " #X " only works on numbers");\
             global_frame->vars[id].u.f = v1.u.f X v2.u.f;
         
@@ -1189,9 +1165,7 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_SET_GLOBAL_MUL)    GLOBAL_MATH_SHARED(*)    NEXT_CASE(INST_SET_GLOBAL_DIV)    GLOBAL_MATH_SHARED(/)
         
         #define CAP_MATH_SHARED(X)\
-            Value v2 = STACK_POP(2, 0);\
-            uint16_t id = PROG_IDX(1);\
-            Value v1 = *frame->caps[id];\
+            Value v2 = STACK_POP(2, 0); uint16_t id = PROG_IDX(1); Value v1 = *frame->caps[id];\
             assert4(0, types_same_match(v1.tag, v2.tag, VALUE_FLOAT), "Operator " #X " only works on numbers");\
             frame->caps[id]->u.f = v1.u.f X v2.u.f;
         
@@ -1218,9 +1192,7 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_CMP_AND)    MATH_SHARED_BOOL(!!(v1.u.f) && !!(v2.u.f))
         NEXT_CASE(INST_CMP_OR)     MATH_SHARED_BOOL(!!(v1.u.f) || !!(v2.u.f))
         
-        #define LOCAL_MATH_SHARED(X)\
-            Value v1 = STACK_POP(1, 0);\
-            Value v2 = STACK_POP(2, 0);\
+        #define LOCAL_MATH_SHARED(X) Value v1 = STACK_POP(1, 0); Value v2 = STACK_POP(2, 0);\
             assert4(0, types_same_match(v1.tag, v2.tag, VALUE_FLOAT), "Operator " #X " only works on numbers");\
             STACK_POP(1, 0).u.f = v1.u.f X v2.u.f;
 
@@ -1228,8 +1200,7 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_SET_MUL)    LOCAL_MATH_SHARED(*)    NEXT_CASE(INST_SET_DIV)    LOCAL_MATH_SHARED(/)
             
         #define ADDR_MATH_SHARED(X)\
-            Value v2 = STACK_POP(1, 0);\
-            Value * v1p = frame->set_tgt_agg; /*assert4(0, v1p, "Internal compiler error");*/\
+            Value v2 = STACK_POP(1, 0); Value * v1p = frame->set_tgt_agg; \
             assert4(0, types_same_match(v1p->tag, v2.tag, VALUE_FLOAT), "Operator " #X " only works on numbers");\
             frame->set_tgt_agg = 0;\
             v1p->u.f = v1p->u.f X v2.u.f;
@@ -1248,15 +1219,13 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(INST_FORSTART)
             Value v = STACK_POP(5, 0);
             assert4(0, v.tag == VALUE_FLOAT, "For loops can only operate on numbers");
-            uint16_t id = PROG_IDX(1);
-            uint16_t idx = PROG_IDX(2);
+            uint16_t id = PROG_IDX(1); uint16_t idx = PROG_IDX(2);
             frame->vars[id] = val_float(0.0);
             if ((uint64_t)v.u.f < 1) READ_AND_GOTO_TARGET(3)
             frame->forloops[idx].l = 0;
             frame->forloops[idx].r = v.u.f;
         NEXT_CASE(INST_FOREND)
-            uint16_t id = PROG_IDX(1);
-            uint16_t idx = PROG_IDX(2);
+            uint16_t id = PROG_IDX(1); uint16_t idx = PROG_IDX(2);
             frame->forloops[idx].l += 1;
             value_store(&frame->vars[id], val_float(frame->forloops[idx].l));
             if (frame->forloops[idx].l < frame->forloops[idx].r) READ_AND_GOTO_TARGET(3)
@@ -1268,7 +1237,6 @@ size_t interpret(size_t from_pc)
         NEXT_CASE(PUSH_STRING)      STACK_PUSH(2, val_string(stringdup(cs->compiled_strings[PROG_IDX(1)])), 0)
         
         NEXT_CASE(PUSH_LOCAL)       STACK_PUSH(2, frame->vars[PROG_IDX(1)], 0)
-        NEXT_CASE(PUSH_2LOCALS)     STACK_PUSH(3, frame->vars[PROG_IDX(1)], 0) STACK_PUSH(3, frame->vars[PROG_IDX(2)], 1)
         NEXT_CASE(PUSH_FUNCNAME)    STACK_PUSH(2, val_func(PROG_IDX(1)), 0)
         
         NEXT_CASE(INST_SET)
@@ -1305,8 +1273,10 @@ size_t interpret(size_t from_pc)
             //  whether a string value is going to be used as a "place"/"lvalue" or not.
         
         NEXT_CASE(INST_INDEX)    BIN_STACKPOP(1) INST_INDEX_BODY(1)
-        
         NEXT_CASE(INST_INDEX_LOC)    BIN_STACKPOP(1) INST_INDEX_LOC_BODY()
+        
+        NEXT_CASE(INST_INDEX_INT)    Value v1 = STACK_POP(2, 0); Value v2 = val_float(PROG_IDX(1)); INST_INDEX_BODY(2)
+        NEXT_CASE(INST_INDEX_LOC_INT)    Value v1 = STACK_POP(2, 0); Value v2 = val_float(PROG_IDX(1)); INST_INDEX_LOC_BODY()
         
         NEXT_CASE(INST_LAMBDA)
             Value v = val_func(PROG_IDX(1));
@@ -1316,12 +1286,7 @@ size_t interpret(size_t from_pc)
             if (f->cap_count) f->cap_data = (Value **)zalloc(sizeof(Value *) * f->cap_count);
             for (size_t j = 0; j < f->cap_count; j++)
                 f->cap_data[j] = (f->caps[j] < 0) ? frame->caps[-f->caps[j]] : &frame->vars[f->caps[j]];
-            v.u.fn = f;
-            STACK_PUSH(5, v, 0) READ_AND_GOTO_TARGET(3)
-        
-        NEXT_CASE(INST_INDEX_INT)    Value v1 = STACK_POP(2, 0); Value v2 = val_float(PROG_IDX(1)); INST_INDEX_BODY(2)
-        
-        NEXT_CASE(INST_INDEX_LOC_INT)    Value v1 = STACK_POP(2, 0); Value v2 = val_float(PROG_IDX(1)); INST_INDEX_LOC_BODY()
+            v.u.fn = f; STACK_PUSH(5, v, 0) READ_AND_GOTO_TARGET(3)
         
         END_CASE()
         DECAULT_CASE()
