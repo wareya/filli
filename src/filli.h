@@ -915,7 +915,7 @@ int8_t val_cmp(Value v1, Value v2)
     else if (v1.tag == VALUE_FLOAT && v1.u.f > v2.u.f) return 1;
     else if (v1.tag == VALUE_STRING) return v1.u.s == v2.u.s ? 0 : strcmp(*v1.u.s, *v2.u.s);
     else if ((v1.tag == VALUE_ARRAY && v1.u.a != v2.u.a) || (v1.tag == VALUE_DICT && v1.u.d != v2.u.d)) return 2;
-    else if ((v1.tag == VALUE_FUNC && v1.u.f != v2.u.f) || (v1.tag == VALUE_STATE && v1.u.fs != v2.u.fs)) return 2;
+    else if ((v1.tag == VALUE_FUNC && v1.u.fn != v2.u.fn) || (v1.tag == VALUE_STATE && v1.u.fs != v2.u.fs)) return 2;
     return 0;
 }
 
